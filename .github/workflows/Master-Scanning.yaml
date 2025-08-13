@@ -51,9 +51,7 @@ on:
         default: false
 
 jobs:
-  # This setup job is the entry point for domain-based scans.
-  # It creates a matrix of domains to be processed.
-  setup-domain-matrix:
+  setup-matrix:
     runs-on: ubuntu-latest
     outputs:
       domains: ${{ steps.build-matrix.outputs.domains }}
@@ -61,19 +59,23 @@ jobs:
       - name: Build domains JSON array
         id: build-matrix
         run: |
+          # split targets on spaces
           IFS=' ' read -r -a arr <<< "${{ github.event.inputs.targets }}"
-          json=$(printf '%s\n' "${arr[@]}" | jq -R . | jq -s -c .)
+          json=$(printf '%s\n' "${arr[@]}" | jq -R . | jq -sc .)
           echo "domains=$json" >> $GITHUB_OUTPUT
 
-  # Job 1: Gathers URLs for each domain and splits them into chunks.
-  gather-and-split:
-    name: Gather and Split URLs
-    needs: setup-domain-matrix
+  process-domain:
+    name: Process each domain
+    needs: setup-matrix
     if: ${{ github.event.inputs.input_mode != 'url_list' }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        domain: ${{ fromJson(needs.setup-domain-matrix.outputs.domains) }}
+        domain: ${{ fromJson(needs.setup-matrix.outputs.domains) }}
+    env:
+      STORAGE_REPO: ${{ github.event.inputs.storage_repo }}
+      COOKIE: ${{ github.event.inputs.custom_cookie }}
+      HEADER: ${{ github.event.inputs.custom_header }}
     steps:
       - name: Install tools
         run: |
@@ -82,94 +84,39 @@ jobs:
           go install github.com/tomnomnom/waybackurls@latest
           go install github.com/lc/gau/v2/cmd/gau@latest
           go install github.com/tomnomnom/unfurl@latest
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
-      - name: Gather and Prepare URLs
-        id: prep
+      - name: Gather URLs
+        run: |
+          mkdir -p work
+          echo "${{ matrix.domain }}" | waybackurls >> work/raw.txt
+          echo "${{ matrix.domain }}" | gau >> work/raw.txt
+          sort -u work/raw.txt > work/urls.txt
+
+      - name: Prepare Scan Inputs
+        run: |
+          mkdir -p work/filtered
+          # Extract parameters from the raw list of all URLs
+          cat work/urls.txt | unfurl keys | sort -u > work/filtered/params.txt
+          # Filter out common static file extensions to create a list for scanning
+          grep -ivE "\\.(css|js|jpeg|jpg|png|gif|svg|ico|webp|pdf|mp4|mp3|eot|woff|woff2|ttf)(\\?.*)?$" work/urls.txt > work/filtered/non-static-urls.txt
+
+      - name: Find Live URLs
         run: |
           set -e
-          DOMAIN="${{ matrix.domain }}"
-          URL_DIR="work/$DOMAIN"
-          mkdir -p "$URL_DIR/chunks"
+          INPUT_FILE="work/filtered/non-static-urls.txt"
+          OUTPUT_FILE="work/filtered/live-urls.txt"
+          CHUNK_DIR="work/filtered/chunks"
+          mkdir -p "$CHUNK_DIR"
 
-          echo "Gathering URLs for $DOMAIN..."
-          echo "$DOMAIN" | waybackurls >> "$URL_DIR/raw.txt"
-          echo "$DOMAIN" | gau >> "$URL_DIR/raw.txt"
-          sort -u "$URL_DIR/raw.txt" > "$URL_DIR/urls.txt"
+          echo "Splitting URLs for parallel httpx scan..."
+          split -l 500 "$INPUT_FILE" "$CHUNK_DIR/chunk_"
 
-          echo "Extracting params and filtering static files..."
-          cat "$URL_DIR/urls.txt" | unfurl keys | sort -u > "$URL_DIR/params.txt"
-          grep -ivE "\\.(css|js|jpeg|jpg|png|gif|svg|ico|webp|pdf|mp4|mp3|eot|woff|woff2|ttf)(\\?.*)?$" "$URL_DIR/urls.txt" > "$URL_DIR/non-static-urls.txt"
+          echo "Running httpx in parallel..."
+          find "$CHUNK_DIR" -type f -name "chunk_*" | xargs -P 20 -I {} httpx -l {} -silent -threads 25 -timeout 10 -retries 2 -follow-redirects >> "$OUTPUT_FILE"
 
-          echo "Splitting non-static URLs into chunks..."
-          split -l 500 "$URL_DIR/non-static-urls.txt" "$URL_DIR/chunks/chunk_"
-
-          echo "url_dir=$URL_DIR" >> $GITHUB_OUTPUT
-
-      - name: Upload domain work directory
-        uses: actions/upload-artifact@v4
-        with:
-          name: work-${{ matrix.domain }}
-          path: ${{ steps.prep.outputs.url_dir }}
-
-  # Job 2: Runs httpx in parallel on the URL chunks.
-  parallel-httpx:
-    name: Parallel httpx Scan
-    needs: [gather-and-split, setup-domain-matrix]
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        domain: ${{ fromJson(needs.setup-domain-matrix.outputs.domains) }}
-      max-parallel: 20
-    steps:
-      - name: Install httpx
-        run: go install github.com/projectdiscovery/httpx/cmd/httpx@latest && echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-
-      - name: Download domain work directory
-        uses: actions/download-artifact@v4
-        with:
-          name: work-${{ matrix.domain }}
-          path: work/${{ matrix.domain }}
-
-      - name: Run httpx on all chunks
-        id: httpx
-        run: |
-          set -e
-          CHUNK_DIR="work/${{ matrix.domain }}/chunks"
-          LIVE_URLS_FILE="work/${{ matrix.domain }}/live-urls.txt"
-          find "$CHUNK_DIR" -type f -name "chunk_*" | xargs -P 10 -I {} cat {} | httpx -silent -threads 50 -timeout 10 -retries 2 -follow-redirects > "$LIVE_URLS_FILE"
-          echo "live_urls_file=$LIVE_URLS_FILE" >> $GITHUB_OUTPUT
-
-      - name: Upload httpx results
-        uses: actions/upload-artifact@v4
-        with:
-          name: httpx-results-${{ matrix.domain }}
-          path: ${{ steps.httpx.outputs.live_urls_file }}
-
-  # Job 3: Collects results, commits them, and triggers downstream scanners.
-  collect-and-trigger:
-    name: Collect and Trigger
-    needs: [parallel-httpx, setup-domain-matrix]
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        domain: ${{ fromJson(needs.setup-domain-matrix.outputs.domains) }}
-    env:
-      STORAGE_REPO: ${{ github.event.inputs.storage_repo }}
-      COOKIE: ${{ github.event.inputs.custom_cookie }}
-      HEADER: ${{ github.event.inputs.custom_header }}
-    steps:
-      - name: Download domain work directory
-        uses: actions/download-artifact@v4
-        with:
-          name: work-${{ matrix.domain }}
-          path: work/${{ matrix.domain }}
-
-      - name: Download httpx results
-        uses: actions/download-artifact@v4
-        with:
-          name: httpx-results-${{ matrix.domain }}
-          path: work/${{ matrix.domain }}
+          echo "Parallel httpx scan complete."
 
       - name: Commit discovery results
         env:
@@ -180,36 +127,29 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan github.com >> ~/.ssh/known_hosts
           git clone "$STORAGE_REPO" storage
-
-          DOMAIN="${{ matrix.domain }}"
-          mkdir -p "storage/$DOMAIN/discovery"
-          cp "work/$DOMAIN/live-urls.txt" "storage/$DOMAIN/discovery/live-urls.txt"
-          cp "work/$DOMAIN/params.txt"     "storage/$DOMAIN/discovery/params.txt"
-
+          mkdir -p storage/${{ matrix.domain }}/discovery
+          cp work/filtered/live-urls.txt storage/${{ matrix.domain }}/discovery/live-urls.txt
+          cp work/filtered/params.txt     storage/${{ matrix.domain }}/discovery/params.txt
           cd storage
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          if ! git diff --quiet; then
-            git add .
-            git commit -m "Discovery for $DOMAIN" || echo "No changes"
-            git push
-          else
-            echo "No changes to commit"
-          fi
+          git add .
+          git commit -m "Discovery for ${{ matrix.domain }}" || echo "No changes"
+          git push
 
-      - name: Trigger Scanners
+      - name: Trigger x8 & kxss scanners
+        if: ${{ github.event.inputs.run_x8 || github.event.inputs.run_kxss }}
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          DOMAIN="${{ matrix.domain }}"
-          # Trigger x8 & kxss
-          if [[ "${{ github.event.inputs.run_x8 }}" == "true" || "${{ github.event.inputs.run_kxss }}" == "true" ]]; then
-            curl -s -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
+          curl -s -X POST \
+            -H "Authorization: token $GH_PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/bigidavii/Xss-Scanner/actions/workflows/x8-kxss-workflow.yaml/dispatches \
             -d '{
               "ref": "main",
               "inputs": {
-                "target_name": "'"$DOMAIN"'",
+                "target_name": "'"${{ matrix.domain }}"'",
                 "storage_repo": "'"$STORAGE_REPO"'",
                 "custom_cookie": "'"$COOKIE"'",
                 "custom_header": "'"$HEADER"'",
@@ -217,35 +157,46 @@ jobs:
                 "run_kxss": ${{ github.event.inputs.run_kxss }}
               }
             }'
-          fi
-          # Trigger Dalfox
-          if [[ "${{ github.event.inputs.run_dalfox }}" == "true" ]]; then
-            curl -s -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
+
+      - name: Trigger Dalfox scanner
+        if: ${{ github.event.inputs.run_dalfox }}
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          # The user needs to replace ACCOUNT4 with their actual account name for the Dalfox scanner repo.
+          curl -s -X POST \
+            -H "Authorization: token $GH_PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/mamadzht-max/Dalfox-Scanner/actions/workflows/dalfox-scanner.yml/dispatches \
             -d '{
               "ref": "main",
               "inputs": {
-                "target_name": "'"$DOMAIN"'",
+                "target_name": "'"${{ matrix.domain }}"'",
                 "storage_repo": "'"$STORAGE_REPO"'",
                 "custom_cookie": "'"$COOKIE"'",
                 "custom_header": "'"$HEADER"'"
               }
             }'
-          fi
-          # Trigger Nuclei
-          if [[ "${{ github.event.inputs.run_nuclei }}" == "true" ]]; then
-            curl -s -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/actions/workflows/nuclei-workflow-template.yaml/dispatches \
+
+      - name: Trigger Nuclei scanner
+        if: ${{ github.event.inputs.run_nuclei }}
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          curl -s -X POST \
+            -H "Authorization: token $GH_PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/dispatches \
             -d '{
-              "ref": "main",
-              "inputs": {
-                "target_name": "'"$DOMAIN"'",
-                "storage_repo": "'"$STORAGE_REPO"'"
+              "event_type": "nuclei-scan",
+              "client_payload": {
+                "target_name": "'"${{ matrix.domain }}"'",
+                "storage_repo": "'"$STORAGE_REPO"'",
+                "custom_cookie": "'"$COOKIE"'",
+                "custom_header": "'"$HEADER"'"
               }
             }'
-          fi
 
-  # The legacy url_list mode remains unchanged.
   url-gathering-legacy:
     name: URL Gathering (legacy)
     if: ${{ github.event.inputs.input_mode == 'url_list' }}
@@ -341,17 +292,17 @@ jobs:
     env:
       GH_PAT: ${{ secrets.GH_PAT }}
     steps:
-      - name: Trigger Scanners
+      - name: Trigger x8 & kxss
+        if: ${{ github.event.inputs.run_x8 || github.event.inputs.run_kxss }}
         run: |
-          TARGET_NAME="url_list_${{ github.run_id }}"
-          # Trigger x8 & kxss
-          if [[ "${{ github.event.inputs.run_x8 }}" == "true" || "${{ github.event.inputs.run_kxss }}" == "true" ]]; then
-            curl -s -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
+          curl -s -X POST \
+            -H "Authorization: token $GH_PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/bigidavii/Xss-Scanner/actions/workflows/x8-kxss-workflow.yaml/dispatches \
             -d '{
               "ref": "main",
               "inputs": {
-                "target_name": "'"$TARGET_NAME"'",
+                "target_name": "'"${{ steps.tgt.outputs.TARGET_NAME }}"'",
                 "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
                 "custom_cookie": "'"${{ github.event.inputs.custom_cookie }}"'",
                 "custom_header": "'"${{ github.event.inputs.custom_header }}"'",
@@ -359,30 +310,35 @@ jobs:
                 "run_kxss": ${{ github.event.inputs.run_kxss }}
               }
             }'
-          fi
-          # Trigger Dalfox
-          if [[ "${{ github.event.inputs.run_dalfox }}" == "true" ]]; then
-            curl -s -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/mamadzht-max/Dalfox-Scanner/actions/workflows/dalfox-scanner.yml/dispatches \
+      - name: Trigger Dalfox
+        if: ${{ github.event.inputs.run_dalfox }}
+        run: |
+          curl -s -X POST \
+            -H "Authorization: token $GH_PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/ACCOUNT4/Dalfox-Scanner/dispatches \
             -d '{
-              "ref": "main",
-              "inputs": {
-                "target_name": "'"$TARGET_NAME"'",
+              "event_type": "dalfox-scan",
+              "client_payload": {
+                "target_name": "'"${{ steps.tgt.outputs.TARGET_NAME }}"'",
                 "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
                 "custom_cookie": "'"${{ github.event.inputs.custom_cookie }}"'",
                 "custom_header": "'"${{ github.event.inputs.custom_header }}"'"
               }
             }'
-          fi
-          # Trigger Nuclei
-          if [[ "${{ github.event.inputs.run_nuclei }}" == "true" ]]; then
-            curl -s -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/actions/workflows/nuclei-workflow-template.yaml/dispatches \
+      - name: Trigger Nuclei
+        if: ${{ github.event.inputs.run_nuclei }}
+        run: |
+          curl -s -X POST \
+            -H "Authorization: token $GH_PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/dispatches \
             -d '{
-              "ref": "main",
-              "inputs": {
-                "target_name": "'"$TARGET_NAME"'",
-                "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'"
+              "event_type": "nuclei-scan",
+              "client_payload": {
+                "target_name": "'"${{ steps.tgt.outputs.TARGET_NAME }}"'",
+                "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
+                "custom_cookie": "'"${{ github.event.inputs.custom_cookie }}"'",
+                "custom_header": "'"${{ github.event.inputs.custom_header }}"'"
               }
             }'
-          fi
