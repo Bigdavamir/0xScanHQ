@@ -1,4 +1,4 @@
-name: "Dalfox XSS Scanner"
+name: "Dalfox XSS Scanner (Parallel)"
 
 on:
   workflow_dispatch:
@@ -19,19 +19,13 @@ on:
         default: ''
 
 jobs:
-  scan:
+  setup:
     runs-on: ubuntu-latest
+    outputs:
+      chunks: ${{ steps.split.outputs.chunks }}
     steps:
       - name: Checkout main branch
         uses: actions/checkout@v3
-
-      - name: Setup Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: '1.23'
-
-      - name: Install Dalfox
-        run: go install github.com/hahwul/dalfox/v2@latest
 
       - name: Setup SSH
         env:
@@ -45,23 +39,99 @@ jobs:
       - name: Clone Storage Repo
         run: git clone ${{ github.event.inputs.storage_repo }} storage_repo_clone
 
-      - name: Run Dalfox Scan
+      - name: Inject Custom Parameters
+        id: inject
         run: |
           set -e
-          TARGET_NAME=${{ github.event.inputs.target_name }}
-          URL_FILE_PATH="storage_repo_clone/$TARGET_NAME/discovery/live-urls.txt"
-          OUTPUT_FILE="dalfox-output.txt"
-          PAYLOAD_FILE="dalfox_payload.txt" # This file should exist in the repo
-          BLIND_XSS_URL="https://1.bigdav.ir/dalfox-${TARGET_NAME}"
+          URL_FILE="storage_repo_clone/${{ github.event.inputs.target_name }}/discovery/live-urls.txt"
+          PARAMS_FILE="storage_repo_clone/${{ github.event.inputs.target_name }}/discovery/params.txt"
+          EXPANDED_URL_FILE="expanded-urls.txt"
 
-          if [ ! -f "$URL_FILE_PATH" ]; then
-            echo "URL file not found: $URL_FILE_PATH"
+          if [ ! -f "$URL_FILE" ]; then
+            echo "URL file not found: $URL_FILE"
             exit 1
           fi
 
-          echo "Starting Dalfox scan..."
+          # Always include the original URLs
+          cp "$URL_FILE" "$EXPANDED_URL_FILE"
 
-          # Build header arguments
+          if [ -s "$PARAMS_FILE" ]; then
+            echo "Params file found, injecting custom parameters..."
+            while IFS= read -r url; do
+              while IFS= read -r param; do
+                # Skip empty lines
+                if [ -z "$param" ]; then continue; fi
+                # Append parameter to the URL
+                if [[ "$url" == *"?"* ]]; then
+                  echo "${url}&${param}=FUZZ" >> "$EXPANDED_URL_FILE"
+                else
+                  echo "${url}?${param}=FUZZ" >> "$EXPANDED_URL_FILE"
+                fi
+              done < "$PARAMS_FILE"
+            done < "$URL_FILE"
+          else
+            echo "Params file not found or is empty, skipping parameter injection."
+          fi
+
+          echo "Created expanded URL list with $(wc -l < $EXPANDED_URL_FILE) total URLs."
+          echo "url_file=$EXPANDED_URL_FILE" >> $GITHUB_OUTPUT
+
+      - name: Split URL list into chunks
+        id: split
+        run: |
+          set -e
+          URL_FILE_PATH="${{ steps.inject.outputs.url_file }}"
+          mkdir -p url_chunks
+          # Split the file into chunks of 50 lines each
+          split -l 50 "$URL_FILE_PATH" url_chunks/urls_
+          # Create a JSON array of the chunk filenames
+          chunks=$(ls url_chunks | jq -R . | jq -s -c .)
+          echo "chunks=$chunks" >> $GITHUB_OUTPUT
+
+      - name: Upload chunks as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: url-chunks
+          path: url_chunks/
+
+  parallel-scan:
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        chunk: ${{ fromJson(needs.setup.outputs.chunks) }}
+      max-parallel: 20
+
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v3
+
+      - name: Download URL chunks
+        uses: actions/download-artifact@v4
+        with:
+          name: url-chunks
+          path: url_chunks/
+
+      - name: Setup Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.23'
+
+      - name: Install Dalfox
+        run: go install github.com/hahwul/dalfox/v2@latest
+
+      - name: Run Dalfox Scan on chunk
+        id: dalfox
+        run: |
+          set -e
+          CHUNK_FILE="url_chunks/${{ matrix.chunk }}"
+          OUTPUT_FILE="dalfox-output-${{ matrix.chunk }}"
+          PAYLOAD_FILE="dalfox_payload.txt"
+          BLIND_XSS_URL="https://1.bigdav.ir/dalfox-${{ github.event.inputs.target_name }}"
+
+          echo "Starting Dalfox scan on chunk: ${{ matrix.chunk }}"
+
           HEADER_ARGS=()
           if [[ -n "${{ github.event.inputs.custom_cookie }}" ]]; then
             HEADER_ARGS+=(-H "Cookie: ${{ github.event.inputs.custom_cookie }}")
@@ -70,24 +140,56 @@ jobs:
             HEADER_ARGS+=(-H "${{ github.event.inputs.custom_header }}")
           fi
 
-          # Run dalfox once on the entire file of URLs
-          # It automatically finds and tests parameters in the URLs.
-          $HOME/go/bin/dalfox file "$URL_FILE_PATH" \
-            --custom-payload-file "$PAYLOAD_FILE" \
+          $HOME/go/bin/dalfox file "$CHUNK_FILE" \
+            --custom-payload "$PAYLOAD_FILE" \
+            --only-custom-payload \
+            --skip-bav \
             -b "$BLIND_XSS_URL" \
             --silence \
+            --skip-headless \
+            -w 25 \
             -o "$OUTPUT_FILE" \
             "${HEADER_ARGS[@]}"
 
-          echo "Dalfox scan complete. Output saved to $OUTPUT_FILE"
+          echo "Dalfox scan complete for chunk: ${{ matrix.chunk }}. Output saved to $OUTPUT_FILE"
+          echo "output_file=$OUTPUT_FILE" >> $GITHUB_OUTPUT
 
-      - name: Push results to storage repo
+      - name: Upload Dalfox results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dalfox-results-chunk-${{ matrix.chunk }}
+          path: ${{ steps.dalfox.outputs.output_file }}
+
+  push-to-storage:
+    needs: parallel-scan
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH and Git
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
         run: |
-          cd storage_repo_clone
-          mkdir -p ${{ github.event.inputs.target_name }}/xss
-          mv ../dalfox-output.txt ${{ github.event.inputs.target_name }}/xss/dalfox.txt
+          mkdir -p ~/.ssh/
+          echo "${DEPLOY_KEY}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
+      - name: Download all scan results
+        uses: actions/download-artifact@v4
+        with:
+          path: all-dalfox-results
+      - name: Push results to storage repo
+        run: |
+          git clone ${{ github.event.inputs.storage_repo }} storage
+          cd storage
+
+          TARGET_DIR="${{ github.event.inputs.target_name }}/xss"
+          mkdir -p "$TARGET_DIR"
+
+          # Consolidate all dalfox results into one file
+          find ../all-dalfox-results -type f -name "dalfox-output-*" -exec cat {} + > "$TARGET_DIR/dalfox.txt"
+
           git add .
           if ! git diff --staged --quiet; then
             git commit -m "Add Dalfox scan results for ${{ github.event.inputs.target_name }}"
