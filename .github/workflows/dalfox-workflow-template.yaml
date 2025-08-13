@@ -152,29 +152,46 @@ jobs:
           echo "Dalfox scan complete for chunk: ${{ matrix.chunk }}. Output saved to $OUTPUT_FILE"
           echo "::set-output name=output_file::$OUTPUT_FILE"
 
-      - name: Push results to storage repo
+      - name: Upload Dalfox results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dalfox-results-chunk-${{ matrix.chunk }}
+          path: ${{ steps.dalfox.outputs.output_file }}
+
+  push-to-storage:
+    needs: parallel-scan
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH and Git
         env:
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
-          STORAGE_REPO: ${{ github.event.inputs.storage_repo }}
         run: |
-          set -e
-          git clone "$STORAGE_REPO" storage_repo_clone
-          cd storage_repo_clone
+          mkdir -p ~/.ssh/
+          echo "${DEPLOY_KEY}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+      - name: Download all scan results
+        uses: actions/download-artifact@v4
+        with:
+          path: all-dalfox-results
+      - name: Push results to storage repo
+        run: |
+          git clone ${{ github.event.inputs.storage_repo }} storage
+          cd storage
 
           TARGET_DIR="${{ github.event.inputs.target_name }}/xss"
           mkdir -p "$TARGET_DIR"
 
-          RESULT_FILE_NAME="dalfox-results-${{ matrix.chunk }}"
-          mv "../${{ steps.dalfox.outputs.output_file }}" "$TARGET_DIR/$RESULT_FILE_NAME"
+          # Consolidate all dalfox results into one file
+          find ../all-dalfox-results -type f -name "dalfox-output-*" -exec cat {} + > "$TARGET_DIR/dalfox.txt"
 
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions"
           git add .
-
           if ! git diff --staged --quiet; then
-            git commit -m "Add Dalfox scan results for ${{ github.event.inputs.target_name }} (chunk ${{ matrix.chunk }})"
-            # Retry push on failure
-            for i in {1..3}; do git push && break || sleep 5; done
+            git commit -m "Add Dalfox scan results for ${{ github.event.inputs.target_name }}"
+            git push
           else
-            echo "No changes to commit for chunk ${{ matrix.chunk }}"
+            echo "No changes to commit"
           fi
