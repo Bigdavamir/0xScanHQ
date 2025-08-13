@@ -39,19 +39,53 @@ jobs:
       - name: Clone Storage Repo
         run: git clone ${{ github.event.inputs.storage_repo }} storage_repo_clone
 
+      - name: Inject Custom Parameters
+        id: inject
+        run: |
+          set -e
+          URL_FILE="storage_repo_clone/${{ github.event.inputs.target_name }}/discovery/live-urls.txt"
+          PARAMS_FILE="storage_repo_clone/${{ github.event.inputs.target_name }}/discovery/params.txt"
+          EXPANDED_URL_FILE="expanded-urls.txt"
+
+          if [ ! -f "$URL_FILE" ]; then
+            echo "URL file not found: $URL_FILE"
+            exit 1
+          fi
+
+          # Always include the original URLs
+          cp "$URL_FILE" "$EXPANDED_URL_FILE"
+
+          if [ -s "$PARAMS_FILE" ]; then
+            echo "Params file found, injecting custom parameters..."
+            while IFS= read -r url; do
+              while IFS= read -r param; do
+                # Skip empty lines
+                if [ -z "$param" ]; then continue; fi
+                # Append parameter to the URL
+                if [[ "$url" == *"?"* ]]; then
+                  echo "${url}&${param}=FUZZ" >> "$EXPANDED_URL_FILE"
+                else
+                  echo "${url}?${param}=FUZZ" >> "$EXPANDED_URL_FILE"
+                fi
+              done < "$PARAMS_FILE"
+            done < "$URL_FILE"
+          else
+            echo "Params file not found or is empty, skipping parameter injection."
+          fi
+
+          echo "Created expanded URL list with $(wc -l < $EXPANDED_URL_FILE) total URLs."
+          echo "::set-output name=url_file::$EXPANDED_URL_FILE"
+
       - name: Split URL list into chunks
         id: split
         run: |
-          URL_FILE_PATH="storage_repo_clone/${{ github.event.inputs.target_name }}/discovery/live-urls.txt"
-          if [ ! -f "$URL_FILE_PATH" ]; then
-            echo "URL file not found: $URL_FILE_PATH"
-            exit 1
-          fi
+          set -e
+          URL_FILE_PATH="${{ steps.inject.outputs.url_file }}"
           mkdir -p url_chunks
           # Split the file into chunks of 50 lines each
           split -l 50 "$URL_FILE_PATH" url_chunks/urls_
           # Create a JSON array of the chunk filenames
-          chunks=$(ls url_chunks | jq -R . | jq -s .)
+          chunks=$(ls url_chunks | jq -R . | jq -s -c .)
           echo "chunks=$chunks" >> $GITHUB_OUTPUT
 
       - name: Upload chunks as artifact
