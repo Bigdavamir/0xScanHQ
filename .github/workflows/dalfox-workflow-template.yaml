@@ -98,9 +98,10 @@ jobs:
     needs: setup
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         chunk: ${{ fromJson(needs.setup.outputs.chunks) }}
-      fail-fast: false
+      max-parallel: 20
 
     steps:
       - name: Checkout main branch
@@ -142,6 +143,7 @@ jobs:
           $HOME/go/bin/dalfox file "$CHUNK_FILE" \
             --custom-payload "$PAYLOAD_FILE" \
             --only-custom-payload \
+            --skip-bav \
             -b "$BLIND_XSS_URL" \
             --silence \
             --skip-headless \
