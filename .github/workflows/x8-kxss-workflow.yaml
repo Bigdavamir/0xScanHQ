@@ -45,7 +45,7 @@ jobs:
         run: |
           git clone ${{ github.event.inputs.storage_repo }} storage
           mkdir -p combined-results
-          cp storage/${{ github.event.inputs.target_name }}/* combined-results/ 2>/dev/null || echo "No files to copy"
+          cp storage/${{ github.event.inputs.target_name }}/discovery/* combined-results/ 2>/dev/null || echo "No files to copy"
       - name: Check if files exist
         id: check_files
         run: |
