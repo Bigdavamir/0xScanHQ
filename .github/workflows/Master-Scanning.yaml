@@ -98,7 +98,7 @@ jobs:
         run: |
           mkdir -p work/filtered
           cat work/urls.txt | httpx -silent -threads 50 > work/filtered/live-urls.txt
-          cat work/urls.txt | unfurl querystring keys | sort -u > work/filtered/params.txt
+          cat work/urls.txt | unfurl keys | sort -u > work/filtered/params.txt
 
       - name: Commit discovery results
         env:
