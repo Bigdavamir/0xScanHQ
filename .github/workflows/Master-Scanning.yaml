@@ -94,11 +94,17 @@ jobs:
           echo "${{ matrix.domain }}" | gau >> work/raw.txt
           sort -u work/raw.txt > work/urls.txt
 
-      - name: Filter and extract params
+      - name: Prepare Scan Inputs
         run: |
           mkdir -p work/filtered
-          cat work/urls.txt | httpx -silent -threads 50 > work/filtered/live-urls.txt
+          # Extract parameters from the raw list of all URLs
           cat work/urls.txt | unfurl keys | sort -u > work/filtered/params.txt
+          # Filter out common static file extensions to create a list for scanning
+          grep -ivE "\\.(css|js|jpeg|jpg|png|gif|svg|ico|webp|pdf|mp4|mp3|eot|woff|woff2|ttf)(\\?.*)?$" work/urls.txt > work/filtered/non-static-urls.txt
+
+      - name: Find Live URLs
+        run: |
+          cat work/filtered/non-static-urls.txt | httpx -silent -threads 50 -timeout 10 -retries 2 -follow-redirects > work/filtered/live-urls.txt
 
       - name: Commit discovery results
         env:

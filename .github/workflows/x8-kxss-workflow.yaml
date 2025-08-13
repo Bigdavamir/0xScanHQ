@@ -54,7 +54,7 @@ jobs:
           else
             echo "urls_exist=false" >> $GITHUB_OUTPUT
           fi
-          if [[ -s "combined-results/unfurl-params.txt" ]]; then
+          if [[ -s "combined-results/params.txt" ]]; then
             echo "params_exist=true" >> $GITHUB_OUTPUT
           else
             echo "params_exist=false" >> $GITHUB_OUTPUT
@@ -65,63 +65,9 @@ jobs:
           name: combined-results-artifact
           path: combined-results/
 
-  httpx-scan:
-    needs: fetch-results
-    if: needs.fetch-results.outputs.urls_exist == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        chunk: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
-    steps:
-      - name: Download combined results artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: combined-results-artifact
-          path: combined-results/
-      - name: Install httpx
-        run: |
-          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-      - name: Run httpx on chunk
-        run: |
-          mkdir -p httpx-results-${{ matrix.chunk }}
-          TOTAL_LINES=$(wc -l < combined-results/live-urls.txt)
-          LINES_PER_CHUNK=$(( (TOTAL_LINES + 20 - 1) / 20 ))
-          START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
-          END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-          sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > chunk-${{ matrix.chunk }}.txt
-          if [[ -s "chunk-${{ matrix.chunk }}.txt" ]]; then
-            cat chunk-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 -follow-redirects > httpx-results-${{ matrix.chunk }}/httpx.txt
-          else
-            touch httpx-results-${{ matrix.chunk }}/httpx.txt
-          fi
-      - name: Upload httpx results artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: httpx-results-chunk-${{ matrix.chunk }}
-          path: httpx-results-${{ matrix.chunk }}/
-
-  consolidate-httpx:
-    needs: httpx-scan
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all httpx results artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: all-httpx-artifacts
-      - name: Consolidate all httpx results
-        run: |
-          mkdir -p consolidated-httpx-results
-          find ./all-httpx-artifacts -type f -name 'httpx.txt' -exec cat {} + | awk '{print $1}' | grep -E '^https?://' | sort -u > consolidated-httpx-results/all-httpx.txt
-      - name: Upload consolidated httpx results artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: consolidated-httpx-results-artifact
-          path: consolidated-httpx-results/
-
   x8-scan:
-    needs: [fetch-results, consolidate-httpx]
-    if: "github.event.inputs.run_x8 == 'true' && needs.fetch-results.outputs.params_exist == 'true'"
+    needs: fetch-results
+    if: "github.event.inputs.run_x8 == 'true' && needs.fetch-results.outputs.urls_exist == 'true' && needs.fetch-results.outputs.params_exist == 'true'"
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -132,10 +78,6 @@ jobs:
         with:
           name: combined-results-artifact
           path: combined-results/
-      - uses: actions/download-artifact@v4
-        with:
-          name: consolidated-httpx-results-artifact
-          path: consolidated-httpx-results/
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y expect
       - name: Install x8
@@ -148,12 +90,12 @@ jobs:
           sudo cp $HOME/.cargo/bin/x8 /usr/local/bin/x8
       - name: Generate chunk file
         run: |
-          if [ -s consolidated-httpx-results/all-httpx.txt ]; then
-            TOTAL_LINES=$(wc -l < consolidated-httpx-results/all-httpx.txt)
+          if [ -s combined-results/live-urls.txt ]; then
+            TOTAL_LINES=$(wc -l < combined-results/live-urls.txt)
             LINES_PER_CHUNK=$(( (TOTAL_LINES + 20 - 1) / 20 ))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-            sed -n "${START_LINE},${END_LINE}p" consolidated-httpx-results/all-httpx.txt > x8-chunk-${{ matrix.chunk }}.txt
+            sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > x8-chunk-${{ matrix.chunk }}.txt
           else
             touch x8-chunk-${{ matrix.chunk }}.txt
           fi
@@ -176,7 +118,7 @@ jobs:
             OUTPUT_FILE="x8-results-${{ matrix.chunk }}/x8.txt"
             touch $OUTPUT_FILE
             while IFS= read -r url; do
-              unbuffer x8 -u "$url" -w combined-results/unfurl-params.txt -X GET POST "${HEADER_ARGS[@]}" 2>&1 | sed -r "s/\\x1B\\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" >> "$OUTPUT_FILE"
+              unbuffer x8 -u "$url" -w combined-results/params.txt -X GET POST "${HEADER_ARGS[@]}" 2>&1 | sed -r "s/\\x1B\\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" >> "$OUTPUT_FILE"
             done < "$INPUT_FILE"
           else
             touch x8-results-${{ matrix.chunk }}/x8.txt
@@ -191,8 +133,8 @@ jobs:
           path: x8-results-${{ matrix.chunk }}/
 
   kxss-scan:
-    needs: [fetch-results, consolidate-httpx]
-    if: "github.event.inputs.run_kxss == 'true' && needs.fetch-results.outputs.params_exist == 'true'"
+    needs: fetch-results
+    if: "github.event.inputs.run_kxss == 'true' && needs.fetch-results.outputs.urls_exist == 'true' && needs.fetch-results.outputs.params_exist == 'true'"
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -203,10 +145,6 @@ jobs:
         with:
           name: combined-results-artifact
           path: combined-results/
-      - uses: actions/download-artifact@v4
-        with:
-          name: consolidated-httpx-results-artifact
-          path: consolidated-httpx-results/
       - name: Install kxss
         run: |
           go install github.com/Emoe/kxss@latest
@@ -225,12 +163,12 @@ jobs:
           fi
 
           mkdir -p kxss-results-${{ matrix.chunk }}
-          if [ -s consolidated-httpx-results/all-httpx.txt ]; then
-            TOTAL_LINES=$(wc -l < consolidated-httpx-results/all-httpx.txt)
+          if [ -s combined-results/live-urls.txt ]; then
+            TOTAL_LINES=$(wc -l < combined-results/live-urls.txt)
             LINES_PER_CHUNK=$(( (TOTAL_LINES + 20 - 1) / 20 ))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-            sed -n "${START_LINE},${END_LINE}p" consolidated-httpx-results/all-httpx.txt > kxss-urls-${{ matrix.chunk }}.txt
+            sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > kxss-urls-${{ matrix.chunk }}.txt
 
             if [[ -s "kxss-urls-${{ matrix.chunk }}.txt" ]]; then
               cat kxss-urls-${{ matrix.chunk }}.txt | while IFS= read -r url; do
@@ -240,7 +178,7 @@ jobs:
                   else
                     echo "${url}?${param}=KXSS"
                   fi
-                done < combined-results/unfurl-params.txt
+                done < combined-results/params.txt
               done | sort -u | kxss -timeout 300 -threads 50 "${HEADER_ARGS[@]}" > kxss-results-${{ matrix.chunk }}/kxss-output.txt
             else
               touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
