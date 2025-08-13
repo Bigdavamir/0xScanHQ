@@ -1,0 +1,237 @@
+name: "Master Scanning Pipeline"
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_mode:
+        description: "Input type: single_domain, domain_list, or url_list"
+        required: true
+        default: "single_domain"
+        type: choice
+        options:
+          - single_domain
+          - domain_list
+          - url_list
+      targets:
+        description: "Domain(s) or URLs (comma-separated or file URL)"
+        required: true
+        type: string
+      storage_repo:
+        description: "SSH URL of private repo to store results"
+        required: true
+        type: string
+      custom_cookie:
+        description: "Optional cookie"
+        required: false
+        type: string
+      custom_header:
+        description: "Optional header"
+        required: false
+        type: string
+      run_x8:
+        description: "Run x8 scanner"
+        required: false
+        type: boolean
+        default: true
+      run_kxss:
+        description: "Run kxss scanner"
+        required: false
+        type: boolean
+        default: true
+      run_nuclei:
+        description: "Run Nuclei scanner"
+        required: false
+        type: boolean
+        default: false
+      run_dalfox:
+        description: "Run Dalfox scanner"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  url-gathering:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare inputs
+        run: |
+          mkdir -p results
+          echo "${{ github.event.inputs.targets }}" | tr ',' '\\n' > results/input_raw.txt
+      - name: Install gathering tools
+        if: ${{ github.event.inputs.input_mode != 'url_list' }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y wget git
+          go install github.com/tomnomnom/waybackurls@latest
+          go install github.com/lc/gau/v2/cmd/gau@latest
+          sudo cp ~/go/bin/* /usr/local/bin/
+      - name: Generate URLs from URL List
+        if: github.event.inputs.input_mode == 'url_list'
+        run: |
+          echo "URL list mode selected. Using inputs directly."
+          cp results/input_raw.txt all-urls.txt
+          # Also copy to targets.txt for consistency in artifacts
+          cp results/input_raw.txt results/targets.txt
+      - name: Generate URLs from Domain List
+        if: github.event.inputs.input_mode != 'url_list'
+        run: |
+          echo "Domain mode selected. Running discovery tools."
+          cp results/input_raw.txt results/targets.txt
+          cat results/targets.txt | waybackurls > urls_wayback.txt || true
+          cat results/targets.txt | gau --threads 5 > urls_gau.txt || true
+          cat urls_wayback.txt urls_gau.txt | sort -u > all-urls.txt
+      - name: Upload raw results
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-results
+          path: |
+            all-urls.txt
+            results/targets.txt
+
+  probe-and-filter:
+    needs: url-gathering
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download raw results
+        uses: actions/download-artifact@v4
+        with:
+          name: raw-results
+          path: raw-results/
+      - name: Install filtering tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y wget git
+          go install github.com/tomnomnom/unfurl@latest
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          sudo cp ~/go/bin/* /usr/local/bin/
+      - name: Filter URLs & extract params
+        run: |
+          cd raw-results
+          cat all-urls.txt | unfurl --unique keys > ../all-params.txt
+          cat all-urls.txt | httpx -silent -status-code -mc 200,301,302 > live-urls.txt
+          awk '
+            BEGIN {
+                split("jpg jpeg png gif svg css js json pdf doc docx xls xlsx ppt pptx zip gz tar bz2 rar 7z exe dmg iso bin mp3 mp4 avi mov wmv flv webm webp", exts, " ");
+                for (i in exts) static_exts["." exts[i]] = 1;
+            }
+            {
+                url = $0;
+                path = url;
+                q_pos = index(url, "?");
+                if (q_pos > 0) path = substr(url, 1, q_pos - 1);
+                match(path, /\.[^./]+$/);
+                ext = tolower(substr(path, RSTART, RLENGTH));
+                if (!(ext in static_exts)) print url;
+            }
+          ' live-urls.txt > ../final-live-urls.txt
+      - name: Upload filtered results
+        uses: actions/upload-artifact@v4
+        with:
+          name: filtered-results
+          path: |
+            final-live-urls.txt
+            all-params.txt
+            raw-results/targets.txt
+
+  commit-results:
+    needs: probe-and-filter
+    runs-on: ubuntu-latest
+    outputs:
+      target_name: ${{ steps.commit_step.outputs.target_name }}
+    steps:
+      - name: Download filtered results
+        uses: actions/download-artifact@v4
+        with:
+          name: filtered-results
+          path: final-results/
+      - name: Setup SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+      - name: Commit results
+        id: commit_step
+        run: |
+          cd final-results
+          TARGET_NAME=$(head -n 1 targets.txt | sed 's/[^a-zA-Z0-9]/-/g' || echo "default-target")
+          echo "target_name=$TARGET_NAME" >> $GITHUB_OUTPUT
+          git clone "${{ github.event.inputs.storage_repo }}" storage
+          mkdir -p storage/$TARGET_NAME
+          mv final-live-urls.txt storage/$TARGET_NAME/live-urls.txt
+          mv all-params.txt storage/$TARGET_NAME/params.txt
+          cd storage
+          git add .
+          if ! git diff --cached --quiet; then
+            git commit -m "Update discovery results for $TARGET_NAME"
+            git push
+          else
+            echo "No changes to commit."
+          fi
+
+  trigger-scanners:
+    needs: commit-results
+    runs-on: ubuntu-latest
+    if: success()
+    steps:
+      - name: Trigger XSS Scanner
+        if: github.event.inputs.run_x8 == true || github.event.inputs.run_kxss == true
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          TARGET_NAME: ${{ needs.commit-results.outputs.target_name }}
+          CUSTOM_COOKIE: ${{ github.event.inputs.custom_cookie }}
+          CUSTOM_HEADER: ${{ github.event.inputs.custom_header }}
+          RUN_X8: "${{ github.event.inputs.run_x8 }}"
+          RUN_KXSS: "${{ github.event.inputs.run_kxss }}"
+        run: |
+          curl -s -X POST \
+          -H "Authorization: token $GH_PAT" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/bigidavii/Xss-Scanner/dispatches \
+          -d '{
+            "event_type": "scanner-trigger",
+            "client_payload": {
+              "target_name": "'"$TARGET_NAME"'",
+              "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
+              "custom_cookie": "'"$CUSTOM_COOKIE"'",
+              "custom_header": "'"$CUSTOM_HEADER"'",
+              "run_x8": "'"$RUN_X8"'",
+              "run_kxss": "'"$RUN_KXSS"'"
+            }
+          }'
+      - name: Trigger Nuclei Scanner
+        if: github.event.inputs.run_nuclei == true
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          TARGET_NAME: ${{ needs.commit-results.outputs.target_name }}
+        run: |
+          curl -s -X POST \
+          -H "Authorization: token $GH_PAT" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/dispatches \
+          -d '{
+            "event_type": "scanner-trigger",
+            "client_payload": {
+              "target_name": "'"$TARGET_NAME"'",
+              "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'"
+            }
+          }'
+      - name: Trigger Dalfox Scanner
+        if: github.event.inputs.run_dalfox == true
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          TARGET_NAME: ${{ needs.commit-results.outputs.target_name }}
+        run: |
+          curl -s -X POST \
+          -H "Authorization: token $GH_PAT" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/ACCOUNT4/Dalfox-Scanner/dispatches \
+          -d '{
+            "event_type": "scanner-trigger",
+            "client_payload": {
+              "target_name": "'"$TARGET_NAME"'",
+              "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'"
+            }
+          }'
