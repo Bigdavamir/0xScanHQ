@@ -1,0 +1,97 @@
+name: "Dalfox XSS Scanner"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_name:
+        description: 'Name of target folder in storage repo'
+        required: true
+      storage_repo:
+        description: 'SSH URL of scan-results-storage repo'
+        required: true
+      custom_cookie:
+        description: 'Optional: Custom Cookie header'
+        required: false
+        default: ''
+      custom_header:
+        description: 'Optional: Custom extra header'
+        required: false
+        default: ''
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v3
+
+      - name: Setup Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.18'
+
+      - name: Install Dalfox
+        run: go install github.com/hahwul/dalfox/v2@latest
+
+      - name: Setup SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${DEPLOY_KEY}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: Clone Storage Repo
+        run: git clone ${{ github.event.inputs.storage_repo }} storage_repo_clone
+
+      - name: Run Dalfox Scan
+        run: |
+          set -e
+          TARGET_NAME=${{ github.event.inputs.target_name }}
+          URL_FILE_PATH="storage_repo_clone/$TARGET_NAME/discovery/live-urls.txt"
+          OUTPUT_FILE="dalfox-output.txt"
+          PAYLOAD_FILE="dalfox_payload.txt" # This file should exist in the repo
+          BLIND_XSS_URL="https://1.bigdav.ir/dalfox-${TARGET_NAME}"
+
+          if [ ! -f "$URL_FILE_PATH" ]; then
+            echo "URL file not found: $URL_FILE_PATH"
+            exit 1
+          fi
+
+          echo "Starting Dalfox scan..."
+
+          # Build header arguments
+          HEADER_ARGS=()
+          if [[ -n "${{ github.event.inputs.custom_cookie }}" ]]; then
+            HEADER_ARGS+=(-H "Cookie: ${{ github.event.inputs.custom_cookie }}")
+          fi
+          if [[ -n "${{ github.event.inputs.custom_header }}" ]]; then
+            HEADER_ARGS+=(-H "${{ github.event.inputs.custom_header }}")
+          fi
+
+          # Run dalfox once on the entire file of URLs
+          # It automatically finds and tests parameters in the URLs.
+          $HOME/go/bin/dalfox file "$URL_FILE_PATH" \
+            --custom-payload-file "$PAYLOAD_FILE" \
+            -b "$BLIND_XSS_URL" \
+            --silence \
+            -o "$OUTPUT_FILE" \
+            "${HEADER_ARGS[@]}"
+
+          echo "Dalfox scan complete. Output saved to $OUTPUT_FILE"
+
+      - name: Push results to storage repo
+        run: |
+          cd storage_repo_clone
+          mkdir -p ${{ github.event.inputs.target_name }}/xss
+          mv ../dalfox-output.txt ${{ github.event.inputs.target_name }}/xss/dalfox.txt
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git add .
+          if ! git diff --staged --quiet; then
+            git commit -m "Add Dalfox scan results for ${{ github.event.inputs.target_name }}"
+            git push
+          else
+            echo "No changes to commit"
+          fi
