@@ -177,7 +177,7 @@ jobs:
     if: success()
     steps:
       - name: Trigger XSS Scanner
-        if: github.event.inputs.run_x8 == true && github.event.inputs.run_kxss == true
+        if: github.event.inputs.run_x8 == true || github.event.inputs.run_kxss == true
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           TARGET_NAME: ${{ needs.commit-results.outputs.target_name }}
@@ -186,21 +186,33 @@ jobs:
           RUN_X8: "${{ github.event.inputs.run_x8 }}"
           RUN_KXSS: "${{ github.event.inputs.run_kxss }}"
         run: |
-          curl -s -X POST \
-          -H "Authorization: token $GH_PAT" \
-          -H "Accept: application/vnd.github.v3+json" \
-          https://api.github.com/repos/bigidavii/Xss-Scanner/dispatches \
-          -d '{
-            "event_type": "scanner-trigger",
-            "client_payload": {
-              "target_name": "'"$TARGET_NAME"'",
-              "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
-              "custom_cookie": "'"$CUSTOM_COOKIE"'",
-              "custom_header": "'"$CUSTOM_HEADER"'",
-              "run_x8": "'"$RUN_X8"'",
-              "run_kxss": "'"$RUN_KXSS"'"
-            }
-          }'
+          echo "Attempting to trigger XSS scanner..."
+          echo "Target repo: bigidavii/Xss-Scanner"
+          echo "Run X8: ${{ github.event.inputs.run_x8 }}"
+          echo "Run KXSS: ${{ github.event.inputs.run_kxss }}"
+          response_code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: token $GH_PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/bigidavii/Xss-Scanner/dispatches \
+            -d '{
+              "event_type": "scanner-trigger",
+              "client_payload": {
+                "target_name": "'"$TARGET_NAME"'",
+                "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
+                "custom_cookie": "'"$CUSTOM_COOKIE"'",
+                "custom_header": "'"$CUSTOM_HEADER"'",
+                "run_x8": "'"${{ github.event.inputs.run_x8 }}"'",
+                "run_kxss": "'"${{ github.event.inputs.run_kxss }}"'"
+              }
+            }')
+          echo "Trigger response code: $response_code"
+          if [ "$response_code" -ne 204 ]; then
+            echo "::error::Failed to trigger XSS scanner. Received HTTP status $response_code."
+            exit 1
+          else
+            echo "Successfully triggered XSS scanner."
+          fi
       - name: Trigger Nuclei Scanner
         if: github.event.inputs.run_nuclei == true
         env:
