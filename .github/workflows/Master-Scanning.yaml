@@ -186,8 +186,7 @@ jobs:
       - name: Build URL list
         run: |
           mkdir -p work
-          echo "${{ github.event.inputs.targets }}" | tr ' ' '
-' > work/urls.txt
+          echo "${{ github.event.inputs.targets }}" | tr ' ' '\n' > work/urls.txt
       - name: Upload raw URLs
         uses: actions/upload-artifact@v4
         with:
