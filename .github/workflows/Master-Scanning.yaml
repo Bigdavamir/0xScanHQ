@@ -171,16 +171,17 @@ jobs:
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          # The user needs to replace ACCOUNT3 with their actual account name for the Nuclei scanner repo.
           curl -s -X POST \
             -H "Authorization: token $GH_PAT" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/actions/workflows/nuclei-workflow-template.yaml/dispatches \
+            https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/dispatches \
             -d '{
-              "ref": "main",
-              "inputs": {
+              "event_type": "nuclei-scan",
+              "client_payload": {
                 "target_name": "'"${{ matrix.domain }}"'",
-                "storage_repo": "'"$STORAGE_REPO"'"
+                "storage_repo": "'"$STORAGE_REPO"'",
+                "custom_cookie": "'"$COOKIE"'",
+                "custom_header": "'"$HEADER"'"
               }
             }'
 
@@ -316,15 +317,16 @@ jobs:
       - name: Trigger Nuclei
         if: ${{ github.event.inputs.run_nuclei }}
         run: |
-          # The user needs to replace ACCOUNT3 with their actual account name for the Nuclei scanner repo.
           curl -s -X POST \
             -H "Authorization: token $GH_PAT" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/actions/workflows/nuclei-workflow-template.yaml/dispatches \
+            https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/dispatches \
             -d '{
-              "ref": "main",
-              "inputs": {
+              "event_type": "nuclei-scan",
+              "client_payload": {
                 "target_name": "'"${{ steps.tgt.outputs.TARGET_NAME }}"'",
-                "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'"
+                "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
+                "custom_cookie": "'"${{ github.event.inputs.custom_cookie }}"'",
+                "custom_header": "'"${{ github.event.inputs.custom_header }}"'"
               }
             }'
