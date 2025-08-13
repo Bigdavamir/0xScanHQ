@@ -230,6 +230,8 @@ jobs:
     needs: probe-and-filter-legacy
     if: ${{ github.event.inputs.input_mode == 'url_list' }}
     runs-on: ubuntu-latest
+    outputs:
+      TARGET_NAME: ${{ steps.tgt.outputs.TARGET_NAME }}
     steps:
       - name: Compute target name
         id: tgt
@@ -284,7 +286,7 @@ jobs:
             -d '{
               "event_type": "xss-scan",
               "client_payload": {
-                "target_name": "'"${{ steps.tgt.outputs.TARGET_NAME }}"'",
+                "target_name": "'"${{ needs.commit-results-legacy.outputs.TARGET_NAME }}"'",
                 "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
                 "custom_cookie": "'"${{ github.event.inputs.custom_cookie }}"'",
                 "custom_header": "'"${{ github.event.inputs.custom_header }}"'",
@@ -302,7 +304,7 @@ jobs:
             -d '{
               "event_type": "dalfox-scan",
               "client_payload": {
-                "target_name": "'"${{ steps.tgt.outputs.TARGET_NAME }}"'",
+                "target_name": "'"${{ needs.commit-results-legacy.outputs.TARGET_NAME }}"'",
                 "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
                 "custom_cookie": "'"${{ github.event.inputs.custom_cookie }}"'",
                 "custom_header": "'"${{ github.event.inputs.custom_header }}"'"
@@ -318,7 +320,7 @@ jobs:
             -d '{
               "event_type": "nuclei-scan",
               "client_payload": {
-                "target_name": "'"${{ steps.tgt.outputs.TARGET_NAME }}"'",
+                "target_name": "'"${{ needs.commit-results-legacy.outputs.TARGET_NAME }}"'",
                 "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
                 "custom_cookie": "'"${{ github.event.inputs.custom_cookie }}"'",
                 "custom_header": "'"${{ github.event.inputs.custom_header }}"'"
