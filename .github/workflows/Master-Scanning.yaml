@@ -104,7 +104,7 @@ jobs:
           echo "Splitting non-static URLs into chunks..."
           split -l 500 "$URL_DIR/non-static-urls.txt" "$URL_DIR/chunks/chunk_"
 
-          echo "::set-output name=url_dir::$URL_DIR"
+          echo "url_dir=$URL_DIR" >> $GITHUB_OUTPUT
 
       - name: Upload domain work directory
         uses: actions/upload-artifact@v4
@@ -115,7 +115,7 @@ jobs:
   # Job 2: Runs httpx in parallel on the URL chunks.
   parallel-httpx:
     name: Parallel httpx Scan
-    needs: gather-and-split
+    needs: [gather-and-split, setup-domain-matrix]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -138,7 +138,7 @@ jobs:
           CHUNK_DIR="work/${{ matrix.domain }}/chunks"
           LIVE_URLS_FILE="work/${{ matrix.domain }}/live-urls.txt"
           find "$CHUNK_DIR" -type f -name "chunk_*" | xargs -P 10 -I {} cat {} | httpx -silent -threads 50 -timeout 10 -retries 2 -follow-redirects > "$LIVE_URLS_FILE"
-          echo "::set-output name=live_urls_file::$LIVE_URLS_FILE"
+          echo "live_urls_file=$LIVE_URLS_FILE" >> $GITHUB_OUTPUT
 
       - name: Upload httpx results
         uses: actions/upload-artifact@v4
@@ -149,7 +149,7 @@ jobs:
   # Job 3: Collects results, commits them, and triggers downstream scanners.
   collect-and-trigger:
     name: Collect and Trigger
-    needs: parallel-httpx
+    needs: [parallel-httpx, setup-domain-matrix]
     runs-on: ubuntu-latest
     strategy:
       matrix:
