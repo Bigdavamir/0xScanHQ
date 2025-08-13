@@ -146,6 +146,11 @@ jobs:
           else
             echo "No changes to commit for ${{ matrix.domain }}."
           fi
+
+      - name: Debug Inputs
+        run: |
+          echo "Debug: run_x8 value is ${{ github.event.inputs.run_x8 }}"
+          echo "Debug: run_kxss value is ${{ github.event.inputs.run_kxss }}"
       - name: Trigger Scanner for ${{ matrix.domain }}
         if: success() && (github.event.inputs.run_x8 == true || github.event.inputs.run_kxss == true)
         env:
