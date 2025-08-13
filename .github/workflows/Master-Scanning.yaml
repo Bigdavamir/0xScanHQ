@@ -105,8 +105,8 @@ jobs:
       - name: Filter URLs & extract params
         run: |
           cd raw-results
-          cat all-urls.txt | unfurl --unique keys > ../all-params.txt
-          cat all-urls.txt | httpx -silent -status-code -mc 200,301,302 > live-urls.txt
+          cat all-urls.txt | unfurl --unique keys > all-params.txt
+          cat all-urls.txt | httpx -silent -mc 200,301,302 > live-urls.txt
           awk '
             BEGIN {
                 split("jpg jpeg png gif svg css js json pdf doc docx xls xlsx ppt pptx zip gz tar bz2 rar 7z exe dmg iso bin mp3 mp4 avi mov wmv flv webm webp", exts, " ");
@@ -121,14 +121,14 @@ jobs:
                 ext = tolower(substr(path, RSTART, RLENGTH));
                 if (!(ext in static_exts)) print url;
             }
-          ' live-urls.txt > ../final-live-urls.txt
+          ' live-urls.txt > final-live-urls.txt
       - name: Upload filtered results
         uses: actions/upload-artifact@v4
         with:
           name: filtered-results
           path: |
-            final-live-urls.txt
-            all-params.txt
+            raw-results/final-live-urls.txt
+            raw-results/all-params.txt
             raw-results/targets.txt
 
   commit-results:
@@ -177,7 +177,7 @@ jobs:
     if: success()
     steps:
       - name: Trigger XSS Scanner
-        if: github.event.inputs.run_x8 == true || github.event.inputs.run_kxss == true
+        if: github.event.inputs.run_x8 == true && github.event.inputs.run_kxss == true
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           TARGET_NAME: ${{ needs.commit-results.outputs.target_name }}
