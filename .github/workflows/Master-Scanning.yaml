@@ -183,3 +183,59 @@ jobs:
           else
             echo "Successfully triggered XSS scanner."
           fi
+
+      - name: Trigger Dalfox Scanner for ${{ matrix.domain }}
+        if: success() && github.event.inputs.run_dalfox == true
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          TARGET_NAME: ${{ steps.commit_step.outputs.target_name }}
+          STORAGE_REPO: ${{ github.event.inputs.storage_repo }}
+        run: |
+          echo "Attempting to trigger Dalfox scanner for ${{ matrix.domain }}..."
+          response_code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: token $GH_PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/ACCOUNT4/Dalfox-Scanner/dispatches \
+            -d '{
+              "event_type": "dalfox-trigger",
+              "client_payload": {
+                "target_name": "'"$TARGET_NAME"'",
+                "storage_repo": "'"$STORAGE_REPO"'"
+              }
+            }')
+          echo "Trigger response code: $response_code"
+          if [ "$response_code" -ne 204 ]; then
+            echo "::error::Failed to trigger Dalfox scanner. Received HTTP status $response_code."
+            exit 1
+          else
+            echo "Successfully triggered Dalfox scanner."
+          fi
+
+      - name: Trigger Nuclei Scanner for ${{ matrix.domain }}
+        if: success() && github.event.inputs.run_nuclei == true
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          TARGET_NAME: ${{ steps.commit_step.outputs.target_name }}
+          STORAGE_REPO: ${{ github.event.inputs.storage_repo }}
+        run: |
+          echo "Attempting to trigger Nuclei scanner for ${{ matrix.domain }}..."
+          response_code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: token $GH_PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/dispatches \
+            -d '{
+              "event_type": "scanner-trigger",
+              "client_payload": {
+                "target_name": "'"$TARGET_NAME"'",
+                "storage_repo": "'"$STORAGE_REPO"'"
+              }
+            }')
+          echo "Trigger response code: $response_code"
+          if [ "$response_code" -ne 204 ]; then
+            echo "::error::Failed to trigger Nuclei scanner. Received HTTP status $response_code."
+            exit 1
+          else
+            echo "Successfully triggered Nuclei scanner."
+          fi
