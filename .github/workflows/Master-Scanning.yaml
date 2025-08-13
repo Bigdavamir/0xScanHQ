@@ -151,13 +151,14 @@ jobs:
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
+          # The user needs to replace ACCOUNT4 with their actual account name for the Dalfox scanner repo.
           curl -s -X POST \
             -H "Authorization: token $GH_PAT" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/ACCOUNT4/Dalfox-Scanner/dispatches \
+            https://api.github.com/repos/ACCOUNT4/Dalfox-Scanner/actions/workflows/dalfox-workflow.yaml/dispatches \
             -d '{
-              "event_type": "dalfox-scan",
-              "client_payload": {
+              "ref": "main",
+              "inputs": {
                 "target_name": "'"${{ matrix.domain }}"'",
                 "storage_repo": "'"$STORAGE_REPO"'",
                 "custom_cookie": "'"$COOKIE"'",
