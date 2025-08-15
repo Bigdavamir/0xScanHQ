@@ -210,8 +210,8 @@ jobs:
           cd storage
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          if ! git diff --quiet; then
-            git add .
+          git add .
+          if ! git diff --staged --quiet; then
             git commit -m "Discovery for $DOMAIN" || echo "No changes"
             git push
           else
