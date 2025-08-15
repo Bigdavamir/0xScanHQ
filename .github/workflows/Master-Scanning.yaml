@@ -115,7 +115,8 @@ jobs:
     needs: generate-httpx-matrix
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.generate-httpx-matrix.outputs.matrix) }}
+      matrix:
+        include: ${{ fromJson(needs.generate-httpx-matrix.outputs.matrix) }}
     steps:
       - name: Install httpx
         run: |
