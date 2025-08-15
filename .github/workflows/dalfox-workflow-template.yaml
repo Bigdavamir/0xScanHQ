@@ -140,8 +140,7 @@ jobs:
             COUNTER=$((COUNTER+1))
             TEMP_FILE="$TEMP_DIR/result-$COUNTER.txt"
             echo "Scanning URL: $url"
-            # Use -o to save a clean report, and redirect stdout/stderr to a log file
-            # Add '|| true' to prevent the workflow from stopping if one URL fails
+            # Use -o to save a clean report for each URL to a temporary file
             timeout 300 $HOME/go/bin/dalfox url "$url" \
               --custom-payload "$PAYLOAD_FILE" \
               -b "$BLIND_XSS_URL" \
@@ -149,16 +148,13 @@ jobs:
               --fast-scan \
               --skip-mining-all \
               -o "$TEMP_FILE" \
-              "${HEADER_ARGS[@]}" > "$TEMP_FILE.log" 2>&1 || true
+              "${HEADER_ARGS[@]}"
           done < "$INPUT_FILE"
 
-          # Consolidate results. If POCs are found, use them. Otherwise, use logs.
-          if find "$TEMP_DIR" -name "*.txt" -size +0c -print -quit | grep -q .; then
-            echo "Vulnerabilities found. Consolidating POCs."
+          # Consolidate all temporary results into the final output file, if any
+          touch "$FINAL_OUTPUT_FILE"
+          if ls "$TEMP_DIR"/*.txt >/dev/null 2>&1; then
             cat "$TEMP_DIR"/*.txt > "$FINAL_OUTPUT_FILE"
-          else
-            echo "No vulnerabilities found. Consolidating logs for review."
-            cat "$TEMP_DIR"/*.txt.log > "$FINAL_OUTPUT_FILE"
           fi
       - name: Upload Dalfox results artifact
         uses: actions/upload-artifact@v4
