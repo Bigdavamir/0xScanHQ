@@ -67,7 +67,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y sqlmap
-          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           go install github.com/tomnomnom/gf@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
       - name: Install Gf patterns
@@ -86,32 +85,17 @@ jobs:
           else
             touch sqli-chunk-${{ matrix.chunk }}.txt
           fi
-      - name: Filter URLs with GF and Nuclei
+      - name: Filter URLs with GF
         run: |
           INPUT_FILE="sqli-chunk-${{ matrix.chunk }}.txt"
-          GF_OUTPUT="potential-sqli-gf.txt"
-          NUCLEI_OUTPUT="potential-sqli-nuclei.txt"
           FINAL_LIST="final-sqli-candidates.txt"
 
           # Use gf to find URLs with patterns that suggest SQLi
           if [[ -s "$INPUT_FILE" ]]; then
-            gf sqli "$INPUT_FILE" > "$GF_OUTPUT"
+            gf sqli "$INPUT_FILE" > "$FINAL_LIST"
           else
-            touch "$GF_OUTPUT"
+            touch "$FINAL_LIST"
           fi
-
-          # Use nuclei with SQLi templates to find vulnerable URLs
-          if [[ -s "$INPUT_FILE" ]]; then
-            nuclei -l "$INPUT_FILE" -t http/vulnerabilities/generic/error-based-sql-injection.yaml -o "$NUCLEI_OUTPUT"
-          else
-            touch "$NUCLEI_OUTPUT"
-          fi
-
-          # Combine and deduplicate the results
-          cat "$GF_OUTPUT" >> "$FINAL_LIST"
-          # Extract URLs from nuclei output (format: [template-id] [protocol]://host... [matcher-status])
-          grep -oP 'https?://\S+' "$NUCLEI_OUTPUT" >> "$FINAL_LIST"
-          sort -u -o "$FINAL_LIST" "$FINAL_LIST"
       - name: Run SQLMap on filtered URLs
         run: |
           mkdir -p sqli-results-${{ matrix.chunk }}
