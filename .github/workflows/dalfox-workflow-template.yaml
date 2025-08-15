@@ -73,7 +73,7 @@ jobs:
           # Run dalfox once on the entire file of URLs
           # It automatically finds and tests parameters in the URLs.
           $HOME/go/bin/dalfox file "$URL_FILE_PATH" \
-            --custom-payload-file "$PAYLOAD_FILE" \
+            --custom-payload "$PAYLOAD_FILE" \
             -b "$BLIND_XSS_URL" \
             --silence \
             -o "$OUTPUT_FILE" \
