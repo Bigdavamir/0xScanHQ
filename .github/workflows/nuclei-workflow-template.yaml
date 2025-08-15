@@ -1,0 +1,160 @@
+name: "Nuclei Top 10 Scanner"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_name:
+        description: 'Name of target folder in storage repo'
+        required: true
+      storage_repo:
+        description: 'SSH URL of scan-results-storage repo'
+        required: true
+      custom_cookie:
+        description: 'Optional: Custom Cookie header'
+        required: false
+        default: ''
+      custom_header:
+        description: 'Optional: Custom extra header'
+        required: false
+        default: ''
+
+jobs:
+  fetch-results:
+    runs-on: ubuntu-latest
+    outputs:
+      urls_exist: ${{ steps.check_files.outputs.urls_exist }}
+    steps:
+      - name: Setup SSH and Git
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${DEPLOY_KEY}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+      - name: Clone storage repo and copy files
+        run: |
+          git clone ${{ github.event.inputs.storage_repo }} storage
+          mkdir -p combined-results
+          cp storage/${{ github.event.inputs.target_name }}/discovery/live-urls.txt combined-results/ 2>/dev/null || echo "No live-urls.txt file found"
+      - name: Check if files exist
+        id: check_files
+        run: |
+          if [[ -s "combined-results/live-urls.txt" ]]; then
+            echo "urls_exist=true" >> $GITHUB_OUTPUT
+          else
+            echo "urls_exist=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Upload combined results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuclei-top10-combined-results-artifact
+          path: combined-results/
+
+  nuclei-scan:
+    needs: fetch-results
+    if: "needs.fetch-results.outputs.urls_exist == 'true'"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nuclei-top10-combined-results-artifact
+          path: combined-results/
+      - name: Install Nuclei
+        run: |
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+      - name: Generate URL chunk file
+        run: |
+          if [ -s combined-results/live-urls.txt ]; then
+            TOTAL_LINES=$(wc -l < combined-results/live-urls.txt)
+            LINES_PER_CHUNK=$(( (TOTAL_LINES + 20 - 1) / 20 ))
+            START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
+            END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
+            sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > nuclei-chunk-${{ matrix.chunk }}.txt
+          else
+            touch nuclei-chunk-${{ matrix.chunk }}.txt
+          fi
+      - name: Run Nuclei Scan on Chunk
+        run: |
+          set -e
+          INPUT_FILE="nuclei-chunk-${{ matrix.chunk }}.txt"
+          OUTPUT_FILE="nuclei-output-${{ matrix.chunk }}.txt"
+
+          if [ ! -s "$INPUT_FILE" ]; then
+            echo "URL chunk file is empty, skipping Nuclei scan for this chunk."
+            touch "$OUTPUT_FILE"
+            exit 0
+          fi
+
+          # Build header arguments
+          HEADER_ARGS=()
+          if [[ -n "${{ github.event.inputs.custom_cookie }}" ]]; then
+            HEADER_ARGS+=(-H "Cookie: ${{ github.event.inputs.custom_cookie }}")
+          fi
+          if [[ -n "${{ github.event.inputs.custom_header }}" ]]; then
+            HEADER_ARGS+=(-H "${{ github.event.inputs.custom_header }}")
+          fi
+
+          # Run Nuclei with the 10 selected templates
+          nuclei -l "$INPUT_FILE" \
+            -t http/cves/2021/CVE-2021-44228.yaml \
+            -t http/vulnerabilities/generic/path-traversal.yaml \
+            -t http/vulnerabilities/generic/error-based-sql-injection.yaml \
+            -t http/exposed-panels/laravel-telescope.yaml \
+            -t http/misconfigurations/traefik-dashboard-unauthenticated.yaml \
+            -t http/takeovers/subdomain-takeover-generic.yaml \
+            -t http/miscellaneous/exposed-git-config.yaml \
+            -t http/vulnerabilities/generic/ssrf.yaml \
+            -t http/vulnerabilities/apache/apache-struts-rce-cve-2017-5638.yaml \
+            -t javascript/prototype-pollution/generic-prototype-pollution.yaml \
+            -o "$OUTPUT_FILE" \
+            "${HEADER_ARGS[@]}"
+
+      - name: Upload Nuclei results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuclei-top10-results-chunk-${{ matrix.chunk }}
+          path: nuclei-output-${{ matrix.chunk }}.txt
+
+  push-to-storage:
+    needs: [nuclei-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH and Git
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${DEPLOY_KEY}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+      - name: Download all scan results
+        uses: actions/download-artifact@v4
+        with:
+          path: all-results
+      - name: Push results to storage repo
+        run: |
+          git clone ${{ github.event.inputs.storage_repo }} storage
+          mkdir -p storage/${{ github.event.inputs.target_name }}/nuclei-top10
+
+          RESULTS_FILE="storage/${{ github.event.inputs.target_name }}/nuclei-top10/nuclei-top10.txt"
+
+          # Consolidate all nuclei output into a single file
+          find all-results -type f -name "nuclei-output-*.txt" -exec cat {} + > "$RESULTS_FILE"
+
+          cd storage
+          git add .
+          if ! git diff --staged --quiet; then
+            git commit -m "Add Nuclei Top 10 scan results for ${{ github.event.inputs.target_name }}"
+            git push
+          else
+            echo "No changes to commit"
+          fi
