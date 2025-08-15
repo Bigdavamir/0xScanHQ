@@ -151,8 +151,11 @@ jobs:
               "${HEADER_ARGS[@]}"
           done < "$INPUT_FILE"
 
-          # Consolidate all temporary results into the final output file
-          cat "$TEMP_DIR"/*.txt > "$FINAL_OUTPUT_FILE"
+          # Consolidate all temporary results into the final output file, if any
+          touch "$FINAL_OUTPUT_FILE"
+          if ls "$TEMP_DIR"/*.txt >/dev/null 2>&1; then
+            cat "$TEMP_DIR"/*.txt > "$FINAL_OUTPUT_FILE"
+          fi
       - name: Upload Dalfox results artifact
         uses: actions/upload-artifact@v4
         with:
