@@ -100,18 +100,9 @@ jobs:
             HEADER_ARGS+=(-H "${{ github.event.inputs.custom_header }}")
           fi
 
-          # Run Nuclei with the 10 selected templates
+          # Run Nuclei with a robust set of tags for high-impact vulnerabilities
           nuclei -l "$INPUT_FILE" \
-            -t http/cves/2021/CVE-2021-44228.yaml \
-            -t http/vulnerabilities/generic/path-traversal.yaml \
-            -t http/vulnerabilities/generic/error-based-sql-injection.yaml \
-            -t http/exposed-panels/laravel-telescope.yaml \
-            -t http/misconfigurations/traefik-dashboard-unauthenticated.yaml \
-            -t http/takeovers/subdomain-takeover-generic.yaml \
-            -t http/miscellaneous/exposed-git-config.yaml \
-            -t http/vulnerabilities/generic/ssrf.yaml \
-            -t http/vulnerabilities/apache/apache-struts-rce-cve-2017-5638.yaml \
-            -t javascript/prototype-pollution/generic-prototype-pollution.yaml \
+            -tags cve,critical,high,ssrf,sqli,lfi,rce \
             -o "$OUTPUT_FILE" \
             "${HEADER_ARGS[@]}"
 
