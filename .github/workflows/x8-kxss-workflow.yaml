@@ -33,9 +33,7 @@ jobs:
       urls_exist: ${{ steps.check_files.outputs.urls_exist }}
       params_exist: ${{ steps.check_files.outputs.params_exist }}
     steps:
-      - name: Wait for git push to propagate
-        run: sleep 30
-      - name: Setup SSH and Git
+      - name: Setup SSH and Clone with Retry
         env:
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
         run: |
@@ -43,11 +41,24 @@ jobs:
           echo "${DEPLOY_KEY}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan github.com >> ~/.ssh/known_hosts
-      - name: Clone storage repo and copy files
-        run: |
-          git clone ${{ github.event.inputs.storage_repo }} storage
-          mkdir -p combined-results
-          cp storage/${{ github.event.inputs.target_name }}/discovery/* combined-results/ 2>/dev/null || echo "No files to copy"
+
+          for i in {1..5}; do
+            echo "Attempt $i: Cloning storage repo..."
+            if git clone ${{ github.event.inputs.storage_repo }} storage; then
+              if [[ -s "storage/${{ github.event.inputs.target_name }}/discovery/live-urls.txt" && -s "storage/${{ github.event.inputs.target_name }}/discovery/params.txt" ]]; then
+                echo "Discovery files found."
+                mkdir -p combined-results
+                cp storage/${{ github.event.inputs.target_name }}/discovery/* combined-results/
+                exit 0
+              fi
+            fi
+            echo "Discovery files not found or repo not ready, waiting 15 seconds..."
+            rm -rf storage
+            sleep 15
+          done
+
+          echo "Error: Timed out waiting for discovery files."
+          exit 1
       - name: Check if files exist
         id: check_files
         run: |
