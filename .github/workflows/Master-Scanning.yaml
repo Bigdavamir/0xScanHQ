@@ -169,25 +169,6 @@ jobs:
               }
             }'
 
-      - name: Trigger Nuclei Top 10 scanner
-        if: contains(github.event.inputs.scanners_to_run, 'nuclei-top10')
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          curl -s -X POST \
-            -H "Authorization: token $GH_PAT" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/rezazhtt-blip/Nuclei-Scanner/actions/workflows/nuclei-workflow-template.yaml/dispatches" \
-            -d '{
-              "ref": "main",
-              "inputs": {
-                "target_name": "'"${{ matrix.domain }}"'",
-                "storage_repo": "'"$STORAGE_REPO"'",
-                "custom_cookie": "'"$COOKIE"'",
-                "custom_header": "'"$HEADER"'"
-              }
-            }'
-
       - name: Trigger SQLi scanner
         if: contains(github.event.inputs.scanners_to_run, 'sqli')
         env:
@@ -208,17 +189,17 @@ jobs:
             }'
 
       - name: Trigger Nuclei scanner
-        if: contains(github.event.inputs.scanners_to_run, 'nuclei')
+        if: contains(github.event.inputs.scanners_to_run, 'nuclei') || contains(github.event.inputs.scanners_to_run, 'nuclei-top10')
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           curl -s -X POST \
             -H "Authorization: token $GH_PAT" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/dispatches \
+            "https://api.github.com/repos/amirzhtttt-ctrl/Nuclei-Scanner/actions/workflows/nuclei-workflow-template.yaml/dispatches" \
             -d '{
-              "event_type": "nuclei-scan",
-              "client_payload": {
+              "ref": "main",
+              "inputs": {
                 "target_name": "'"${{ matrix.domain }}"'",
                 "storage_repo": "'"$STORAGE_REPO"'",
                 "custom_cookie": "'"$COOKIE"'",
@@ -356,24 +337,6 @@ jobs:
               }
             }'
 
-      - name: Trigger Nuclei Top 10 scanner
-        if: contains(github.event.inputs.scanners_to_run, 'nuclei-top10')
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          curl -s -X POST \
-            -H "Authorization: token $GH_PAT" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/rezazhtt-blip/Nuclei-Scanner/actions/workflows/nuclei-workflow-template.yaml/dispatches" \
-            -d '{
-              "ref": "main",
-              "inputs": {
-                "target_name": "'"${{ steps.tgt.outputs.TARGET_NAME }}"'",
-                "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
-                "custom_cookie": "'"${{ github.event.inputs.custom_cookie }}"'",
-                "custom_header": "'"${{ github.event.inputs.custom_header }}"'"
-              }
-            }'
       - name: Trigger SQLi scanner
         if: contains(github.event.inputs.scanners_to_run, 'sqli')
         env:
@@ -392,16 +355,18 @@ jobs:
                 "custom_header": "'"${{ github.event.inputs.custom_header }}"'"
               }
             }'
-      - name: Trigger Nuclei
-        if: contains(github.event.inputs.scanners_to_run, 'nuclei')
+      - name: Trigger Nuclei scanner
+        if: contains(github.event.inputs.scanners_to_run, 'nuclei') || contains(github.event.inputs.scanners_to_run, 'nuclei-top10')
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           curl -s -X POST \
             -H "Authorization: token $GH_PAT" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/dispatches \
+            "https://api.github.com/repos/amirzhtttt-ctrl/Nuclei-Scanner/actions/workflows/nuclei-workflow-template.yaml/dispatches" \
             -d '{
-              "event_type": "nuclei-scan",
-              "client_payload": {
+              "ref": "main",
+              "inputs": {
                 "target_name": "'"${{ steps.tgt.outputs.TARGET_NAME }}"'",
                 "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
                 "custom_cookie": "'"${{ github.event.inputs.custom_cookie }}"'",
