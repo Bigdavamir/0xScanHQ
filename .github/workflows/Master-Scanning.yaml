@@ -87,27 +87,24 @@ jobs:
           # Filter out common static file extensions to create a list for scanning
           grep -ivE "\\.(css|js|jpeg|jpg|png|gif|svg|ico|webp|pdf|mp4|mp3|eot|woff|woff2|ttf)(\\?.*)?$" work/urls.txt > work/filtered/non-static-urls.txt
 
-      - name: Find Live URLs
-        run: |
-          set -e
-          INPUT_FILE="work/filtered/non-static-urls.txt"
-          OUTPUT_FILE="work/filtered/live-urls.txt"
-          CHUNK_DIR="work/filtered/chunks"
+      - name: Upload URL list for httpx
+        uses: actions/upload-artifact@v4
+        with:
+          name: non-static-urls-${{ matrix.domain }}-${{ github.run_id }}
+          path: work/filtered/non-static-urls.txt
 
-          if [ ! -s "$INPUT_FILE" ]; then
-            echo "URL file is empty, skipping httpx scan."
-            touch "$OUTPUT_FILE"
-            exit 0
-          fi
+      - name: Run parallel httpx scan
+        id: httpx_scan
+        uses: ./.github/workflows/httpx-workflow.yaml
+        with:
+          url_artifact_name: non-static-urls-${{ matrix.domain }}-${{ github.run_id }}
+          run_id: ${{ github.run_id }}-${{ matrix.domain }}
 
-          mkdir -p "$CHUNK_DIR"
-          echo "Splitting URLs for parallel httpx scan..."
-          split -l 500 "$INPUT_FILE" "$CHUNK_DIR/chunk_"
-
-          echo "Running httpx in parallel on $(ls -1q "$CHUNK_DIR" | wc -l) chunks..."
-          find "$CHUNK_DIR" -type f -name "chunk_*" | xargs -P 20 -I {} httpx -l {} -silent -threads 25 -timeout 10 -retries 2 -follow-redirects >> "$OUTPUT_FILE"
-
-          echo "Parallel httpx scan complete. Found $(wc -l < "$OUTPUT_FILE") live URLs."
+      - name: Download live URL results
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.httpx_scan.outputs.result_artifact_name }}
+          path: work/filtered
 
       - name: Commit discovery results
         env:
