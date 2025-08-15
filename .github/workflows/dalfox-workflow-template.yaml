@@ -111,6 +111,7 @@ jobs:
             -b "$BLIND_XSS_URL" \
             --silence \
             --skip-headless \
+            --fast-scan \
             -o "$OUTPUT_FILE" \
             "${HEADER_ARGS[@]}"
       - name: Upload Dalfox results artifact
