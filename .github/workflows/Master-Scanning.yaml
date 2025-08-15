@@ -222,10 +222,11 @@ jobs:
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
+          set -x
           DOMAIN="${{ matrix.domain }}"
           # Trigger x8 & kxss
           if [[ "${{ github.event.inputs.run_x8 }}" == "true" || "${{ github.event.inputs.run_kxss }}" == "true" ]]; then
-            curl -s -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
+            curl -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/bigidavii/Xss-Scanner/actions/workflows/x8-kxss-workflow.yaml/dispatches \
             -d '{
               "ref": "main",
@@ -241,7 +242,7 @@ jobs:
           fi
           # Trigger Dalfox
           if [[ "${{ github.event.inputs.run_dalfox }}" == "true" ]]; then
-            curl -s -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
+            curl -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/mamadzht-max/Dalfox-Scanner/actions/workflows/dalfox-scanner.yml/dispatches \
             -d '{
               "ref": "main",
@@ -255,7 +256,7 @@ jobs:
           fi
           # Trigger Nuclei
           if [[ "${{ github.event.inputs.run_nuclei }}" == "true" ]]; then
-            curl -s -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
+            curl -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/ACCOUNT3/Nuclei-Scanner/actions/workflows/nuclei-workflow-template.yaml/dispatches \
             -d '{
               "ref": "main",
