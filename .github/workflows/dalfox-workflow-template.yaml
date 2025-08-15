@@ -112,6 +112,7 @@ jobs:
             --silence \
             --skip-headless \
             --fast-scan \
+            --skip-mining-all \
             -o "$OUTPUT_FILE" \
             "${HEADER_ARGS[@]}"
       - name: Upload Dalfox results artifact
