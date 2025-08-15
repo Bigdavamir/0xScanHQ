@@ -100,7 +100,7 @@ jobs:
 
       - name: Run parallel httpx scan
         id: httpx_scan
-        uses: ./.github/workflows/httpx-workflow.yaml
+        uses: ${{ github.repository_owner }}/${{ github.event.repository.name }}/.github/workflows/httpx-workflow.yaml@${{ github.ref }}
         with:
           url_artifact_name: non-static-urls-${{ matrix.domain }}-${{ github.run_id }}
           run_id: ${{ github.run_id }}-${{ matrix.domain }}
