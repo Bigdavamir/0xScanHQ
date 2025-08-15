@@ -112,13 +112,16 @@ jobs:
         run: |
           set -e
           INPUT_FILE="hydrated-dalfox-urls-${{ matrix.chunk }}.txt"
-          OUTPUT_FILE="dalfox-output-${{ matrix.chunk }}.txt"
+          FINAL_OUTPUT_FILE="dalfox-output-${{ matrix.chunk }}.txt"
+          TEMP_DIR="temp-dalfox-results-${{ matrix.chunk }}"
+          mkdir -p "$TEMP_DIR"
+
           PAYLOAD_FILE="dalfox_payload.txt" # This file should exist in the repo
           BLIND_XSS_URL="https://1.bigdav.ir/dalfox-${{ github.event.inputs.target_name }}"
 
           if [ ! -s "$INPUT_FILE" ]; then
             echo "URL chunk file is empty, skipping Dalfox scan for this chunk."
-            touch "$OUTPUT_FILE"
+            touch "$FINAL_OUTPUT_FILE"
             exit 0
           fi
 
@@ -132,16 +135,24 @@ jobs:
           fi
 
           # Loop through each hydrated URL and run dalfox individually
+          COUNTER=0
           while IFS= read -r url; do
+            COUNTER=$((COUNTER+1))
+            TEMP_FILE="$TEMP_DIR/result-$COUNTER.txt"
             echo "Scanning URL: $url"
+            # Use -o to save a clean report for each URL to a temporary file
             timeout 300 $HOME/go/bin/dalfox url "$url" \
               --custom-payload "$PAYLOAD_FILE" \
               -b "$BLIND_XSS_URL" \
               --skip-headless \
               --fast-scan \
               --skip-mining-all \
-              "${HEADER_ARGS[@]}" >> "$OUTPUT_FILE"
+              -o "$TEMP_FILE" \
+              "${HEADER_ARGS[@]}"
           done < "$INPUT_FILE"
+
+          # Consolidate all temporary results into the final output file
+          cat "$TEMP_DIR"/*.txt > "$FINAL_OUTPUT_FILE"
       - name: Upload Dalfox results artifact
         uses: actions/upload-artifact@v4
         with:
