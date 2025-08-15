@@ -44,6 +44,11 @@ on:
         required: false
         type: boolean
         default: false
+      run_sqli:
+        description: "Run SQLi scanner?"
+        required: false
+        type: boolean
+        default: false
       run_dalfox:
         description: "Run Dalfox scanner?"
         required: false
@@ -174,6 +179,25 @@ jobs:
             -H "Authorization: token $GH_PAT" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/mamadzht-max/Dalfox-Scanner/actions/workflows/dalfox-scanner.yml/dispatches \
+            -d '{
+              "ref": "main",
+              "inputs": {
+                "target_name": "'"${{ matrix.domain }}"'",
+                "storage_repo": "'"$STORAGE_REPO"'",
+                "custom_cookie": "'"$COOKIE"'",
+                "custom_header": "'"$HEADER"'"
+              }
+            }'
+
+      - name: Trigger SQLi scanner
+        if: ${{ github.event.inputs.run_sqli }}
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          curl -s -X POST \
+            -H "Authorization: token $GH_PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/sqli-workflow-template.yaml/dispatches" \
             -d '{
               "ref": "main",
               "inputs": {
@@ -326,6 +350,24 @@ jobs:
             -d '{
               "event_type": "dalfox-scan",
               "client_payload": {
+                "target_name": "'"${{ steps.tgt.outputs.TARGET_NAME }}"'",
+                "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
+                "custom_cookie": "'"${{ github.event.inputs.custom_cookie }}"'",
+                "custom_header": "'"${{ github.event.inputs.custom_header }}"'"
+              }
+            }'
+      - name: Trigger SQLi scanner
+        if: ${{ github.event.inputs.run_sqli }}
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          curl -s -X POST \
+            -H "Authorization: token $GH_PAT" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/sqli-workflow-template.yaml/dispatches" \
+            -d '{
+              "ref": "main",
+              "inputs": {
                 "target_name": "'"${{ steps.tgt.outputs.TARGET_NAME }}"'",
                 "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
                 "custom_cookie": "'"${{ github.event.inputs.custom_cookie }}"'",

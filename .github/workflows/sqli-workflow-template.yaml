@@ -1,0 +1,171 @@
+name: "SQL Injection Scanner Workflow"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_name:
+        description: 'Name of target folder in storage repo'
+        required: true
+      storage_repo:
+        description: 'SSH URL of scan-results-storage repo'
+        required: true
+      custom_cookie:
+        description: 'Optional: Custom Cookie header'
+        required: false
+        default: ''
+      custom_header:
+        description: 'Optional: Custom extra header'
+        required: false
+        default: ''
+
+jobs:
+  fetch-results:
+    runs-on: ubuntu-latest
+    outputs:
+      urls_exist: ${{ steps.check_files.outputs.urls_exist }}
+    steps:
+      - name: Setup SSH and Git
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${DEPLOY_KEY}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+      - name: Clone storage repo and copy files
+        run: |
+          git clone ${{ github.event.inputs.storage_repo }} storage
+          mkdir -p combined-results
+          cp storage/${{ github.event.inputs.target_name }}/discovery/live-urls.txt combined-results/ 2>/dev/null || echo "No live-urls.txt file found"
+      - name: Check if files exist
+        id: check_files
+        run: |
+          if [[ -s "combined-results/live-urls.txt" ]]; then
+            echo "urls_exist=true" >> $GITHUB_OUTPUT
+          else
+            echo "urls_exist=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Upload combined results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: combined-results-artifact
+          path: combined-results/
+
+  sqli-scan:
+    needs: fetch-results
+    if: "needs.fetch-results.outputs.urls_exist == 'true'"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: combined-results-artifact
+          path: combined-results/
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y sqlmap
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          go install github.com/tomnomnom/gf@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+      - name: Install Gf patterns
+        run: |
+          git clone https://github.com/1ndianl33t/Gf-Patterns.git
+          mkdir -p ~/.gf
+          cp Gf-Patterns/*.json ~/.gf/
+      - name: Generate URL chunk file
+        run: |
+          if [ -s combined-results/live-urls.txt ]; then
+            TOTAL_LINES=$(wc -l < combined-results/live-urls.txt)
+            LINES_PER_CHUNK=$(( (TOTAL_LINES + 20 - 1) / 20 ))
+            START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
+            END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
+            sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > sqli-chunk-${{ matrix.chunk }}.txt
+          else
+            touch sqli-chunk-${{ matrix.chunk }}.txt
+          fi
+      - name: Filter URLs with GF and Nuclei
+        run: |
+          INPUT_FILE="sqli-chunk-${{ matrix.chunk }}.txt"
+          GF_OUTPUT="potential-sqli-gf.txt"
+          NUCLEI_OUTPUT="potential-sqli-nuclei.txt"
+          FINAL_LIST="final-sqli-candidates.txt"
+
+          # Use gf to find URLs with patterns that suggest SQLi
+          if [[ -s "$INPUT_FILE" ]]; then
+            gf sqli "$INPUT_FILE" > "$GF_OUTPUT"
+          else
+            touch "$GF_OUTPUT"
+          fi
+
+          # Use nuclei with SQLi templates to find vulnerable URLs
+          if [[ -s "$INPUT_FILE" ]]; then
+            nuclei -l "$INPUT_FILE" -t "vulnerabilities/sql-injection" -o "$NUCLEI_OUTPUT"
+          else
+            touch "$NUCLEI_OUTPUT"
+          fi
+
+          # Combine and deduplicate the results
+          cat "$GF_OUTPUT" >> "$FINAL_LIST"
+          # Extract URLs from nuclei output (format: [template-id] [protocol]://host... [matcher-status])
+          grep -oP 'https?://\S+' "$NUCLEI_OUTPUT" >> "$FINAL_LIST"
+          sort -u -o "$FINAL_LIST" "$FINAL_LIST"
+      - name: Run SQLMap on filtered URLs
+        run: |
+          mkdir -p sqli-results-${{ matrix.chunk }}
+          INPUT_FILE="final-sqli-candidates.txt"
+          if [[ -s "$INPUT_FILE" ]]; then
+            sqlmap -m "$INPUT_FILE" --batch --random-agent --level=3 --risk=3 --output-dir="sqli-results-${{ matrix.chunk }}"
+          else
+            echo "No potential SQLi candidates found to scan."
+            touch "sqli-results-${{ matrix.chunk }}/sqlmap.log"
+          fi
+      - name: Upload SQLi results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqli-results-chunk-${{ matrix.chunk }}
+          path: sqli-results-${{ matrix.chunk }}/
+
+  push-to-storage:
+    needs: [sqli-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH and Git
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${DEPLOY_KEY}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+      - name: Download all scan results
+        uses: actions/download-artifact@v4
+        with:
+          path: all-results
+      - name: Push results to storage repo
+        run: |
+          git clone ${{ github.event.inputs.storage_repo }} storage
+          mkdir -p storage/${{ github.event.inputs.target_name }}/sqli
+
+          RESULTS_DIR="storage/${{ github.event.inputs.target_name }}/sqli"
+
+          # Consolidate all sqlmap output into a single directory
+          find all-results -type d -name "sqli-results-chunk-*" | while read -r chunk_dir; do
+            if [ -d "$chunk_dir" ]; then
+              cp -r "$chunk_dir"/* "$RESULTS_DIR/"
+            fi
+          done
+
+          cd storage
+          git add .
+          if ! git diff --staged --quiet; then
+            git commit -m "Add SQLi results for ${{ github.event.inputs.target_name }}"
+            git push
+          else
+            echo "No changes to commit"
+          fi
