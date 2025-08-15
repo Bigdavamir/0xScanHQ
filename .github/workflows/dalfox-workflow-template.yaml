@@ -134,7 +134,7 @@ jobs:
           # Loop through each hydrated URL and run dalfox individually
           while IFS= read -r url; do
             echo "Scanning URL: $url"
-            $HOME/go/bin/dalfox url "$url" \
+            timeout 300 $HOME/go/bin/dalfox url "$url" \
               --custom-payload "$PAYLOAD_FILE" \
               -b "$BLIND_XSS_URL" \
               --silence \

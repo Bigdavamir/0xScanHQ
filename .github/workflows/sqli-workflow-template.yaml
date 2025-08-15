@@ -102,7 +102,7 @@ jobs:
 
           # Use nuclei with SQLi templates to find vulnerable URLs
           if [[ -s "$INPUT_FILE" ]]; then
-            nuclei -l "$INPUT_FILE" -t 'http/vulnerabilities/sqli/*.yaml' -o "$NUCLEI_OUTPUT"
+            nuclei -l "$INPUT_FILE" -tags sqli -o "$NUCLEI_OUTPUT"
           else
             touch "$NUCLEI_OUTPUT"
           fi
