@@ -131,13 +131,14 @@ jobs:
 
       - name: Get URL chunk
         run: |
+          CHUNK_NUMBER=${{ matrix.chunk }}
           INPUT_FILE="non-static-urls.txt"
           CHUNK_FILE="httpx-chunk.txt"
           TOTAL_LINES=$(wc -l < "$INPUT_FILE")
           CHUNKS=20
           LINES_PER_CHUNK=$(( (TOTAL_LINES + CHUNKS - 1) / CHUNKS ))
-          START_LINE=$(( ((${matrix.chunk} - 1) * LINES_PER_CHUNK) + 1 ))
-          END_LINE=$(( ${matrix.chunk} * LINES_PER_CHUNK ))
+          START_LINE=$(( ((CHUNK_NUMBER - 1) * LINES_PER_CHUNK) + 1 ))
+          END_LINE=$(( CHUNK_NUMBER * LINES_PER_CHUNK ))
           sed -n "${START_LINE},${END_LINE}p" "$INPUT_FILE" > "$CHUNK_FILE"
 
       - name: Run httpx on chunk
