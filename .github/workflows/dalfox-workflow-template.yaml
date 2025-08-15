@@ -131,15 +131,18 @@ jobs:
             HEADER_ARGS+=(-H "${{ github.event.inputs.custom_header }}")
           fi
 
-          $HOME/go/bin/dalfox file "$INPUT_FILE" \
-            --custom-payload "$PAYLOAD_FILE" \
-            -b "$BLIND_XSS_URL" \
-            --silence \
-            --skip-headless \
-            --fast-scan \
-            --skip-mining-all \
-            -o "$OUTPUT_FILE" \
-            "${HEADER_ARGS[@]}"
+          # Loop through each hydrated URL and run dalfox individually
+          while IFS= read -r url; do
+            echo "Scanning URL: $url"
+            $HOME/go/bin/dalfox url "$url" \
+              --custom-payload "$PAYLOAD_FILE" \
+              -b "$BLIND_XSS_URL" \
+              --silence \
+              --skip-headless \
+              --fast-scan \
+              --skip-mining-all \
+              "${HEADER_ARGS[@]}" >> "$OUTPUT_FILE"
+          done < "$INPUT_FILE"
       - name: Upload Dalfox results artifact
         uses: actions/upload-artifact@v4
         with:
