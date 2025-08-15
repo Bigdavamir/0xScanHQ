@@ -102,7 +102,7 @@ jobs:
 
           # Use nuclei with SQLi templates to find vulnerable URLs
           if [[ -s "$INPUT_FILE" ]]; then
-            nuclei -l "$INPUT_FILE" -t "vulnerabilities/sql-injection" -o "$NUCLEI_OUTPUT"
+            nuclei -l "$INPUT_FILE" -t sqli -o "$NUCLEI_OUTPUT"
           else
             touch "$NUCLEI_OUTPUT"
           fi
@@ -117,7 +117,7 @@ jobs:
           mkdir -p sqli-results-${{ matrix.chunk }}
           INPUT_FILE="final-sqli-candidates.txt"
           if [[ -s "$INPUT_FILE" ]]; then
-            sqlmap -m "$INPUT_FILE" --batch --random-agent --level=3 --risk=3 --output-dir="sqli-results-${{ matrix.chunk }}"
+            sqlmap -m "$INPUT_FILE" --batch --random-agent --level=3 --risk=3 --threads=10 --output-dir="sqli-results-${{ matrix.chunk }}"
           else
             echo "No potential SQLi candidates found to scan."
             touch "sqli-results-${{ matrix.chunk }}/sqlmap.log"
