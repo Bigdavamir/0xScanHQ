@@ -29,36 +29,11 @@ on:
         required: false
         type: string
         default: ""
-      run_x8:
-        description: "Run x8 scanner?"
+      scanners_to_run:
+        description: "Comma-separated list of scanners to run (e.g., dalfox,sqli,nuclei-top10,x8,kxss,nuclei)"
         required: false
-        type: boolean
-        default: true
-      run_kxss:
-        description: "Run kxss scanner?"
-        required: false
-        type: boolean
-        default: true
-      run_nuclei:
-        description: "Run Nuclei scanner?"
-        required: false
-        type: boolean
-        default: false
-      run_nuclei_top10:
-        description: "Run Nuclei Top 10 scanner?"
-        required: false
-        type: boolean
-        default: false
-      run_sqli:
-        description: "Run SQLi scanner?"
-        required: false
-        type: boolean
-        default: false
-      run_dalfox:
-        description: "Run Dalfox scanner?"
-        required: false
-        type: boolean
-        default: false
+        type: string
+        default: "x8,kxss"
 
 jobs:
   setup-matrix:
@@ -154,7 +129,7 @@ jobs:
           git push
 
       - name: Trigger x8 & kxss scanners
-        if: ${{ github.event.inputs.run_x8 || github.event.inputs.run_kxss }}
+        if: ${{ contains(github.event.inputs.scanners_to_run, 'x8') || contains(github.event.inputs.scanners_to_run, 'kxss') }}
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
@@ -169,13 +144,13 @@ jobs:
                 "storage_repo": "'"$STORAGE_REPO"'",
                 "custom_cookie": "'"$COOKIE"'",
                 "custom_header": "'"$HEADER"'",
-                "run_x8": ${{ github.event.inputs.run_x8 }},
-                "run_kxss": ${{ github.event.inputs.run_kxss }}
+                "run_x8": ${{ contains(github.event.inputs.scanners_to_run, 'x8') }},
+                "run_kxss": ${{ contains(github.event.inputs.scanners_to_run, 'kxss') }}
               }
             }'
 
       - name: Trigger Dalfox scanner
-        if: ${{ github.event.inputs.run_dalfox }}
+        if: contains(github.event.inputs.scanners_to_run, 'dalfox')
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
@@ -195,7 +170,7 @@ jobs:
             }'
 
       - name: Trigger Nuclei Top 10 scanner
-        if: ${{ github.event.inputs.run_nuclei_top10 }}
+        if: contains(github.event.inputs.scanners_to_run, 'nuclei-top10')
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
@@ -214,7 +189,7 @@ jobs:
             }'
 
       - name: Trigger SQLi scanner
-        if: ${{ github.event.inputs.run_sqli }}
+        if: contains(github.event.inputs.scanners_to_run, 'sqli')
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
@@ -233,7 +208,7 @@ jobs:
             }'
 
       - name: Trigger Nuclei scanner
-        if: ${{ github.event.inputs.run_nuclei }}
+        if: contains(github.event.inputs.scanners_to_run, 'nuclei')
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
@@ -347,7 +322,7 @@ jobs:
       GH_PAT: ${{ secrets.GH_PAT }}
     steps:
       - name: Trigger x8 & kxss
-        if: ${{ github.event.inputs.run_x8 || github.event.inputs.run_kxss }}
+        if: ${{ contains(github.event.inputs.scanners_to_run, 'x8') || contains(github.event.inputs.scanners_to_run, 'kxss') }}
         run: |
           curl -s -X POST \
             -H "Authorization: token $GH_PAT" \
@@ -360,12 +335,12 @@ jobs:
                 "storage_repo": "'"${{ github.event.inputs.storage_repo }}"'",
                 "custom_cookie": "'"${{ github.event.inputs.custom_cookie }}"'",
                 "custom_header": "'"${{ github.event.inputs.custom_header }}"'",
-                "run_x8": ${{ github.event.inputs.run_x8 }},
-                "run_kxss": ${{ github.event.inputs.run_kxss }}
+                "run_x8": ${{ contains(github.event.inputs.scanners_to_run, 'x8') }},
+                "run_kxss": ${{ contains(github.event.inputs.scanners_to_run, 'kxss') }}
               }
             }'
       - name: Trigger Dalfox
-        if: ${{ github.event.inputs.run_dalfox }}
+        if: contains(github.event.inputs.scanners_to_run, 'dalfox')
         run: |
           curl -s -X POST \
             -H "Authorization: token $GH_PAT" \
@@ -382,7 +357,7 @@ jobs:
             }'
 
       - name: Trigger Nuclei Top 10 scanner
-        if: ${{ github.event.inputs.run_nuclei_top10 }}
+        if: contains(github.event.inputs.scanners_to_run, 'nuclei-top10')
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
@@ -400,7 +375,7 @@ jobs:
               }
             }'
       - name: Trigger SQLi scanner
-        if: ${{ github.event.inputs.run_sqli }}
+        if: contains(github.event.inputs.scanners_to_run, 'sqli')
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
@@ -418,7 +393,7 @@ jobs:
               }
             }'
       - name: Trigger Nuclei
-        if: ${{ github.event.inputs.run_nuclei }}
+        if: contains(github.event.inputs.scanners_to_run, 'nuclei')
         run: |
           curl -s -X POST \
             -H "Authorization: token $GH_PAT" \

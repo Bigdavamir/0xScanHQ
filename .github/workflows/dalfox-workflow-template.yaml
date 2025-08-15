@@ -37,6 +37,7 @@ jobs:
           git clone ${{ github.event.inputs.storage_repo }} storage
           mkdir -p combined-results
           cp storage/${{ github.event.inputs.target_name }}/discovery/live-urls.txt combined-results/ 2>/dev/null || echo "No live-urls.txt file found"
+          cp storage/${{ github.event.inputs.target_name }}/discovery/params.txt combined-results/ 2>/dev/null || echo "No params.txt file found"
       - name: Check if files exist
         id: check_files
         run: |
@@ -83,10 +84,34 @@ jobs:
           else
             touch dalfox-chunk-${{ matrix.chunk }}.txt
           fi
+      - name: Hydrate URLs
+        id: hydrate
+        run: |
+          CHUNK_FILE="dalfox-chunk-${{ matrix.chunk }}.txt"
+          PARAMS_FILE="combined-results/params.txt"
+          HYDRATED_FILE="hydrated-dalfox-urls-${{ matrix.chunk }}.txt"
+          touch "$HYDRATED_FILE"
+
+          if [[ ! -s "$CHUNK_FILE" ]] || [[ ! -s "$PARAMS_FILE" ]]; then
+            echo "URL chunk or params file is empty, skipping hydration."
+            exit 0
+          fi
+
+          while IFS= read -r url; do
+            if [[ "$url" == *"?"* ]]; then
+              # If URL already has params, use it as is
+              echo "$url" >> "$HYDRATED_FILE"
+            else
+              # If URL has no params, append each param from params.txt
+              while IFS= read -r param; do
+                echo "${url}?${param}=FUZZ" >> "$HYDRATED_FILE"
+              done < "$PARAMS_FILE"
+            fi
+          done < "$CHUNK_FILE"
       - name: Run Dalfox Scan on Chunk
         run: |
           set -e
-          INPUT_FILE="dalfox-chunk-${{ matrix.chunk }}.txt"
+          INPUT_FILE="hydrated-dalfox-urls-${{ matrix.chunk }}.txt"
           OUTPUT_FILE="dalfox-output-${{ matrix.chunk }}.txt"
           PAYLOAD_FILE="dalfox_payload.txt" # This file should exist in the repo
           BLIND_XSS_URL="https://1.bigdav.ir/dalfox-${{ github.event.inputs.target_name }}"
