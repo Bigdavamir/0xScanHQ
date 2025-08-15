@@ -33,6 +33,8 @@ jobs:
       urls_exist: ${{ steps.check_files.outputs.urls_exist }}
       params_exist: ${{ steps.check_files.outputs.params_exist }}
     steps:
+      - name: Wait for git push to propagate
+        run: sleep 30
       - name: Setup SSH and Git
         env:
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
