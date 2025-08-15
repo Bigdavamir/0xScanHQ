@@ -162,7 +162,7 @@ jobs:
 
   collect-and-trigger:
     name: Collect and Trigger for ${{ matrix.domain }}
-    needs: parallel-httpx
+    needs: [parallel-httpx, setup-domain-matrix]
     runs-on: ubuntu-latest
     strategy:
       matrix:
