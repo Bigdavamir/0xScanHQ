@@ -51,6 +51,8 @@ jobs:
 
   process-domain:
     name: Process each domain
+    permissions:
+      contents: read
     needs: setup-matrix
     if: ${{ github.event.inputs.input_mode != 'url_list' }}
     runs-on: ubuntu-latest
