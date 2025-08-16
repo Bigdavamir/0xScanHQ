@@ -104,6 +104,7 @@ jobs:
     if: "github.event.inputs.run_x8 == 'true' && needs.fetch-results.outputs.urls_exist == 'true' && needs.fetch-results.outputs.params_exist == 'true'"
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
     steps:
       - name: Download artifacts
@@ -169,6 +170,7 @@ jobs:
     if: "github.event.inputs.run_kxss == 'true' && needs.fetch-results.outputs.urls_exist == 'true' && needs.fetch-results.outputs.params_exist == 'true'"
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
     steps:
       - name: Download artifacts
