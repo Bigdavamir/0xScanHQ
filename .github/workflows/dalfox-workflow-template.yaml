@@ -72,7 +72,7 @@ jobs:
           url_file="combined-results/live-urls.txt"
           if [ -s "$url_file" ]; then
             TOTAL_LINES=$(wc -l < "$url_file")
-            LINES_PER_CHUNK=900
+            LINES_PER_CHUNK=300
             CHUNKS=$(( (TOTAL_LINES + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK ))
             for i in $(seq 1 $CHUNKS); do
               if [ "$IS_FIRST_ITEM" = true ]; then
@@ -110,7 +110,7 @@ jobs:
       - name: Generate URL chunk file
         run: |
           if [ -s combined-results/live-urls.txt ]; then
-            LINES_PER_CHUNK=900
+            LINES_PER_CHUNK=300
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
             sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > dalfox-chunk-${{ matrix.chunk }}.txt
