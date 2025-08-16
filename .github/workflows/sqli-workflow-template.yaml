@@ -66,20 +66,23 @@ jobs:
       - name: Generate Matrix
         id: generate-matrix
         run: |
-          MATRIX='['
+          MATRIX='{"include":['
+          IS_FIRST_ITEM=true
           url_file="combined-results/live-urls.txt"
           if [ -s "$url_file" ]; then
             TOTAL_LINES=$(wc -l < "$url_file")
             LINES_PER_CHUNK=1000
             CHUNKS=$(( (TOTAL_LINES + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK ))
             for i in $(seq 1 $CHUNKS); do
-              if [ "$MATRIX" != "[" ]; then
+              if [ "$IS_FIRST_ITEM" = true ]; then
+                IS_FIRST_ITEM=false
+              else
                 MATRIX="$MATRIX,"
               fi
               MATRIX="$MATRIX{\"chunk\":$i}"
             done
           fi
-          MATRIX="$MATRIX]"
+          MATRIX="$MATRIX]}"
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
   sqli-scan:

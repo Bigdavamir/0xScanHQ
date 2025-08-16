@@ -91,7 +91,8 @@ jobs:
       - name: Generate Matrix
         id: generate-matrix
         run: |
-          MATRIX='['
+          MATRIX='{"include":['
+          IS_FIRST_ITEM=true
           for dir in all-discovery-artifacts/discovery-artifacts-*; do
             domain=$(basename "$dir" | sed 's/discovery-artifacts-//')
             url_file="$dir/non-static-urls.txt"
@@ -100,14 +101,16 @@ jobs:
               LINES_PER_CHUNK=10000
               CHUNKS=$(( (TOTAL_LINES + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK ))
               for i in $(seq 1 $CHUNKS); do
-                if [ "$MATRIX" != "[" ]; then
+                if [ "$IS_FIRST_ITEM" = true ]; then
+                  IS_FIRST_ITEM=false
+                else
                   MATRIX="$MATRIX,"
                 fi
                 MATRIX="$MATRIX{\"domain\":\"$domain\",\"chunk\":$i}"
               done
             fi
           done
-          MATRIX="$MATRIX]"
+          MATRIX="$MATRIX]}"
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
   # Job 4: Run httpx in parallel on each chunk of each domain
@@ -116,8 +119,7 @@ jobs:
     needs: generate-httpx-matrix
     strategy:
       fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.generate-httpx-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.generate-httpx-matrix.outputs.matrix) }}
     steps:
       - name: Install httpx
         run: |
