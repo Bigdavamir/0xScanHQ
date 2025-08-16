@@ -55,6 +55,7 @@ jobs:
           go install github.com/tomnomnom/unfurl@latest
           git clone https://github.com/s0md3v/uro.git
           cd uro
+          go mod init uro
           go build .
           sudo mv uro /usr/local/bin/
           cd ..
