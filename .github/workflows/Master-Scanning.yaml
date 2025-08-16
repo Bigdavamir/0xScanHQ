@@ -53,6 +53,7 @@ jobs:
           go install github.com/tomnomnom/waybackurls@latest
           go install github.com/lc/gau/v2/cmd/gau@latest
           go install github.com/tomnomnom/unfurl@latest
+          go install github.com/s0md3v/uro@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Gather URLs
@@ -60,7 +61,7 @@ jobs:
           mkdir -p work
           echo "${{ matrix.domain }}" | waybackurls >> work/raw.txt
           echo "${{ matrix.domain }}" | gau >> work/raw.txt
-          sort -u work/raw.txt > work/urls.txt
+          cat work/raw.txt | uro | sort -u > work/urls.txt
 
       - name: Prepare Scan Inputs
         run: |
@@ -98,7 +99,7 @@ jobs:
             url_file="$dir/non-static-urls.txt"
             if [ -s "$url_file" ]; then
               TOTAL_LINES=$(wc -l < "$url_file")
-              LINES_PER_CHUNK=10000
+              LINES_PER_CHUNK=16000
               CHUNKS=$(( (TOTAL_LINES + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK ))
               for i in $(seq 1 $CHUNKS); do
                 if [ "$IS_FIRST_ITEM" = true ]; then
@@ -137,7 +138,7 @@ jobs:
           CHUNK_NUMBER=${{ matrix.chunk }}
           INPUT_FILE="non-static-urls.txt"
           CHUNK_FILE="httpx-chunk.txt"
-          LINES_PER_CHUNK=10000
+          LINES_PER_CHUNK=16000
           START_LINE=$(( (CHUNK_NUMBER - 1) * LINES_PER_CHUNK + 1 ))
           END_LINE=$(( CHUNK_NUMBER * LINES_PER_CHUNK ))
           sed -n "${START_LINE},${END_LINE}p" "$INPUT_FILE" > "$CHUNK_FILE"
