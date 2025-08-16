@@ -56,6 +56,7 @@ jobs:
           git clone https://github.com/s0md3v/uro.git
           cd uro
           go mod init uro
+          go mod tidy
           go build .
           sudo mv uro /usr/local/bin/
           cd ..
