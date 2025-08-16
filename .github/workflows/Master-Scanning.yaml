@@ -97,7 +97,7 @@ jobs:
             url_file="$dir/non-static-urls.txt"
             if [ -s "$url_file" ]; then
               TOTAL_LINES=$(wc -l < "$url_file")
-              CHUNKS=20
+              CHUNKS=200
               for i in $(seq 1 $CHUNKS); do
                 if [ "$MATRIX" != "[" ]; then
                   MATRIX="$MATRIX,"
@@ -135,7 +135,7 @@ jobs:
           INPUT_FILE="non-static-urls.txt"
           CHUNK_FILE="httpx-chunk.txt"
           TOTAL_LINES=$(wc -l < "$INPUT_FILE")
-          CHUNKS=20
+          CHUNKS=200
           LINES_PER_CHUNK=$(( (TOTAL_LINES + CHUNKS - 1) / CHUNKS ))
           START_LINE=$(( ((CHUNK_NUMBER - 1) * LINES_PER_CHUNK) + 1 ))
           END_LINE=$(( CHUNK_NUMBER * LINES_PER_CHUNK ))
