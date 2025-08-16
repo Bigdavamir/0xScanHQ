@@ -52,13 +52,43 @@ jobs:
           name: dalfox-combined-results-artifact
           path: combined-results/
 
-  dalfox-scan:
+  generate-matrix:
+    runs-on: ubuntu-latest
     needs: fetch-results
+    if: "needs.fetch-results.outputs.urls_exist == 'true'"
+    outputs:
+      matrix: ${{ steps.generate-matrix.outputs.matrix }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dalfox-combined-results-artifact
+          path: combined-results/
+      - name: Generate Matrix
+        id: generate-matrix
+        run: |
+          MATRIX='['
+          url_file="combined-results/live-urls.txt"
+          if [ -s "$url_file" ]; then
+            TOTAL_LINES=$(wc -l < "$url_file")
+            LINES_PER_CHUNK=500
+            CHUNKS=$(( (TOTAL_LINES + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK ))
+            for i in $(seq 1 $CHUNKS); do
+              if [ "$MATRIX" != "[" ]; then
+                MATRIX="$MATRIX,"
+              fi
+              MATRIX="$MATRIX{\"chunk\":$i}"
+            done
+          fi
+          MATRIX="$MATRIX]"
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  dalfox-scan:
+    needs: [fetch-results, generate-matrix]
     if: "needs.fetch-results.outputs.urls_exist == 'true'"
     runs-on: ubuntu-latest
     strategy:
-      matrix:
-        chunk: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
     steps:
       - name: Checkout main branch
         uses: actions/checkout@v3
@@ -76,8 +106,7 @@ jobs:
       - name: Generate URL chunk file
         run: |
           if [ -s combined-results/live-urls.txt ]; then
-            TOTAL_LINES=$(wc -l < combined-results/live-urls.txt)
-            LINES_PER_CHUNK=$(( (TOTAL_LINES + 20 - 1) / 20 ))
+            LINES_PER_CHUNK=500
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
             sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > dalfox-chunk-${{ matrix.chunk }}.txt
