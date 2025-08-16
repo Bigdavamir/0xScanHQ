@@ -69,10 +69,22 @@ jobs:
         run: |
           MATRIX='{"include":['
           IS_FIRST_ITEM=true
-          url_file="combined-results/live-urls.txt"
-          if [ -s "$url_file" ]; then
-            TOTAL_LINES=$(wc -l < "$url_file")
-            LINES_PER_CHUNK=300
+
+          URL_FILE="combined-results/live-urls.txt"
+
+          LINES_PER_CHUNK=300
+          MAX_JOBS=256
+          MAX_LINES=$((MAX_JOBS * LINES_PER_CHUNK))
+
+          if [ -s "$URL_FILE" ]; then
+            TOTAL_LINES=$(wc -l < "$URL_FILE")
+
+            if [ "$TOTAL_LINES" -gt "$MAX_LINES" ]; then
+              echo "Warning: URL list has $TOTAL_LINES lines, which exceeds the limit for this scanner. Truncating to the first $MAX_LINES lines."
+              head -n "$MAX_LINES" "$URL_FILE" > "${URL_FILE}.tmp" && mv "${URL_FILE}.tmp" "$URL_FILE"
+              TOTAL_LINES=$MAX_LINES
+            fi
+
             CHUNKS=$(( (TOTAL_LINES + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK ))
             for i in $(seq 1 $CHUNKS); do
               if [ "$IS_FIRST_ITEM" = true ]; then
@@ -83,6 +95,7 @@ jobs:
               MATRIX="$MATRIX{\"chunk\":$i}"
             done
           fi
+
           MATRIX="$MATRIX]}"
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 

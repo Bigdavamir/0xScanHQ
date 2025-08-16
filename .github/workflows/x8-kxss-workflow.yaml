@@ -85,7 +85,7 @@ jobs:
           url_file="combined-results/live-urls.txt"
           if [ -s "$url_file" ]; then
             TOTAL_LINES=$(wc -l < "$url_file")
-            LINES_PER_CHUNK=500
+            LINES_PER_CHUNK=16000
             CHUNKS=$(( (TOTAL_LINES + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK ))
             for i in $(seq 1 $CHUNKS); do
               if [ "$IS_FIRST_ITEM" = true ]; then
@@ -125,7 +125,7 @@ jobs:
       - name: Generate chunk file
         run: |
           if [ -s combined-results/live-urls.txt ]; then
-            LINES_PER_CHUNK=500
+            LINES_PER_CHUNK=16000
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
             sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > x8-chunk-${{ matrix.chunk }}.txt
@@ -197,7 +197,7 @@ jobs:
 
           mkdir -p kxss-results-${{ matrix.chunk }}
           if [ -s combined-results/live-urls.txt ]; then
-            LINES_PER_CHUNK=500
+            LINES_PER_CHUNK=16000
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
             sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > kxss-urls-${{ matrix.chunk }}.txt
