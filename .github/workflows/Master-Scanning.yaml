@@ -53,13 +53,9 @@ jobs:
           go install github.com/tomnomnom/waybackurls@latest
           go install github.com/lc/gau/v2/cmd/gau@latest
           go install github.com/tomnomnom/unfurl@latest
-          git clone https://github.com/s0md3v/uro.git
-          cd uro
-          go mod init uro
-          go mod tidy
-          go build .
+          wget https://github.com/s0md3v/uro/releases/download/v0.0.1-beta/uro -O uro
+          chmod +x uro
           sudo mv uro /usr/local/bin/
-          cd ..
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Gather URLs
