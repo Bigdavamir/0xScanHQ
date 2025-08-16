@@ -98,7 +98,7 @@ jobs:
             url_file="$dir/non-static-urls.txt"
             if [ -s "$url_file" ]; then
               TOTAL_LINES=$(wc -l < "$url_file")
-              LINES_PER_CHUNK=60000
+              LINES_PER_CHUNK=10000
               CHUNKS=$(( (TOTAL_LINES + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK ))
               for i in $(seq 1 $CHUNKS); do
                 if [ "$IS_FIRST_ITEM" = true ]; then
@@ -137,7 +137,7 @@ jobs:
           CHUNK_NUMBER=${{ matrix.chunk }}
           INPUT_FILE="non-static-urls.txt"
           CHUNK_FILE="httpx-chunk.txt"
-          LINES_PER_CHUNK=60000
+          LINES_PER_CHUNK=10000
           START_LINE=$(( (CHUNK_NUMBER - 1) * LINES_PER_CHUNK + 1 ))
           END_LINE=$(( CHUNK_NUMBER * LINES_PER_CHUNK ))
           sed -n "${START_LINE},${END_LINE}p" "$INPUT_FILE" > "$CHUNK_FILE"
