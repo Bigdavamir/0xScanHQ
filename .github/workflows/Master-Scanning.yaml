@@ -53,6 +53,7 @@ jobs:
           go install github.com/tomnomnom/waybackurls@latest
           go install github.com/lc/gau/v2/cmd/gau@latest
           go install github.com/tomnomnom/unfurl@latest
+          go install github.com/s0md3v/uro@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Gather URLs
@@ -60,7 +61,7 @@ jobs:
           mkdir -p work
           echo "${{ matrix.domain }}" | waybackurls >> work/raw.txt
           echo "${{ matrix.domain }}" | gau >> work/raw.txt
-          sort -u work/raw.txt > work/urls.txt
+          cat work/raw.txt | uro | sort -u > work/urls.txt
 
       - name: Prepare Scan Inputs
         run: |
