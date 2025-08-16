@@ -66,20 +66,23 @@ jobs:
       - name: Generate Matrix
         id: generate-matrix
         run: |
-          MATRIX='['
+          MATRIX='{"include":['
+          IS_FIRST_ITEM=true
           url_file="combined-results/live-urls.txt"
           if [ -s "$url_file" ]; then
             TOTAL_LINES=$(wc -l < "$url_file")
-            LINES_PER_CHUNK=10000
+            LINES_PER_CHUNK=500
             CHUNKS=$(( (TOTAL_LINES + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK ))
             for i in $(seq 1 $CHUNKS); do
-              if [ "$MATRIX" != "[" ]; then
+              if [ "$IS_FIRST_ITEM" = true ]; then
+                IS_FIRST_ITEM=false
+              else
                 MATRIX="$MATRIX,"
               fi
               MATRIX="$MATRIX{\"chunk\":$i}"
             done
           fi
-          MATRIX="$MATRIX]"
+          MATRIX="$MATRIX]}"
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
   nuclei-scan:
@@ -101,7 +104,7 @@ jobs:
       - name: Generate URL chunk file
         run: |
           if [ -s combined-results/live-urls.txt ]; then
-            LINES_PER_CHUNK=10000
+            LINES_PER_CHUNK=500
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
             sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > nuclei-chunk-${{ matrix.chunk }}.txt
