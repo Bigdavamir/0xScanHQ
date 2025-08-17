@@ -1,5 +1,8 @@
 name: "XSS Scanner Workflow"
 
+env:
+  LINES_PER_CHUNK: 500
+
 on:
   workflow_dispatch:
     inputs:
@@ -89,28 +92,18 @@ jobs:
             exit 0
           fi
 
-          LINES_PER_CHUNK=500
-          MAX_JOBS=256
-          MAX_LINES=$((MAX_JOBS * LINES_PER_CHUNK))
-
           TOTAL_LINES=$(wc -l < "$URL_FILE")
 
           echo "LINES_PER_CHUNK: $LINES_PER_CHUNK"
-          echo "MAX_JOBS: $MAX_JOBS"
-          echo "MAX_LINES: $MAX_LINES"
           echo "TOTAL_LINES: $TOTAL_LINES"
-
-          if [ "$TOTAL_LINES" -gt "$MAX_LINES" ]; then
-            echo "Truncating file..."
-            head -n "$MAX_LINES" "$URL_FILE" > "${URL_FILE}.tmp" && mv "${URL_FILE}.tmp" "$URL_FILE"
-            TOTAL_LINES=$(wc -l < "$URL_FILE") # Recalculate after truncation
-            echo "NEW_TOTAL_LINES: $TOTAL_LINES"
-          else
-            echo "No truncation needed."
-          fi
 
           CHUNKS=$(( (TOTAL_LINES + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK ))
           echo "CALCULATED_CHUNKS: $CHUNKS"
+
+          if [ "$CHUNKS" -gt 256 ]; then
+            echo "Warning: Calculated chunks ($CHUNKS) exceeds GitHub's maximum matrix size of 256."
+            echo "Consider increasing LINES_PER_CHUNK to reduce the number of jobs."
+          fi
 
           MATRIX='{"include":['
           IS_FIRST_ITEM=true
@@ -153,7 +146,6 @@ jobs:
       - name: Generate chunk file
         run: |
           if [ -s combined-results/live-urls.txt ]; then
-            LINES_PER_CHUNK=16000
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
             sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > x8-chunk-${{ matrix.chunk }}.txt
@@ -177,10 +169,7 @@ jobs:
           if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
             INPUT_FILE="x8-chunk-${{ matrix.chunk }}.txt"
             OUTPUT_FILE="x8-results-${{ matrix.chunk }}/x8.txt"
-            touch $OUTPUT_FILE
-            while IFS= read -r url; do
-              unbuffer x8 -u "$url" -w combined-results/params.txt -X GET POST "${HEADER_ARGS[@]}" 2>&1 | sed -r "s/\\x1B\\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" >> "$OUTPUT_FILE"
-            done < "$INPUT_FILE"
+            unbuffer x8 -u "$INPUT_FILE" -w combined-results/params.txt "${HEADER_ARGS[@]}" 2>&1 | sed -r "s/\\x1B\\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" > "$OUTPUT_FILE"
           else
             touch x8-results-${{ matrix.chunk }}/x8.txt
           fi
@@ -225,7 +214,6 @@ jobs:
 
           mkdir -p kxss-results-${{ matrix.chunk }}
           if [ -s combined-results/live-urls.txt ]; then
-            LINES_PER_CHUNK=16000
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
             sed -n "${START_LINE},${END_LINE}p" combined-results/live-urls.txt > kxss-urls-${{ matrix.chunk }}.txt
