@@ -80,24 +80,52 @@ jobs:
       - name: Generate Matrix
         id: generate-matrix
         run: |
+          echo "--- STARTING MATRIX GENERATION FOR X8/KXSS ---"
+          URL_FILE="combined-results/live-urls.txt"
+
+          if [ ! -s "$URL_FILE" ]; then
+            echo "URL file does not exist or is empty. Exiting."
+            echo "matrix={\"include\":[]}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          LINES_PER_CHUNK=500
+          MAX_JOBS=256
+          MAX_LINES=$((MAX_JOBS * LINES_PER_CHUNK))
+
+          TOTAL_LINES=$(wc -l < "$URL_FILE")
+
+          echo "LINES_PER_CHUNK: $LINES_PER_CHUNK"
+          echo "MAX_JOBS: $MAX_JOBS"
+          echo "MAX_LINES: $MAX_LINES"
+          echo "TOTAL_LINES: $TOTAL_LINES"
+
+          if [ "$TOTAL_LINES" -gt "$MAX_LINES" ]; then
+            echo "Truncating file..."
+            head -n "$MAX_LINES" "$URL_FILE" > "${URL_FILE}.tmp" && mv "${URL_FILE}.tmp" "$URL_FILE"
+            TOTAL_LINES=$(wc -l < "$URL_FILE") # Recalculate after truncation
+            echo "NEW_TOTAL_LINES: $TOTAL_LINES"
+          else
+            echo "No truncation needed."
+          fi
+
+          CHUNKS=$(( (TOTAL_LINES + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK ))
+          echo "CALCULATED_CHUNKS: $CHUNKS"
+
           MATRIX='{"include":['
           IS_FIRST_ITEM=true
-          url_file="combined-results/live-urls.txt"
-          if [ -s "$url_file" ]; then
-            TOTAL_LINES=$(wc -l < "$url_file")
-            LINES_PER_CHUNK=16000
-            CHUNKS=$(( (TOTAL_LINES + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK ))
-            for i in $(seq 1 $CHUNKS); do
-              if [ "$IS_FIRST_ITEM" = true ]; then
-                IS_FIRST_ITEM=false
-              else
-                MATRIX="$MATRIX,"
-              fi
-              MATRIX="$MATRIX{\"chunk\":$i}"
-            done
-          fi
+          for i in $(seq 1 $CHUNKS); do
+            if [ "$IS_FIRST_ITEM" = true ]; then
+              IS_FIRST_ITEM=false
+            else
+              MATRIX="$MATRIX,"
+            fi
+            MATRIX="$MATRIX{\"chunk\":$i}"
+          done
           MATRIX="$MATRIX]}"
+          echo "Final matrix object will have $CHUNKS chunks."
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "--- FINISHED MATRIX GENERATION ---"
 
   x8-scan:
     needs: [fetch-results, generate-matrix]
