@@ -202,14 +202,14 @@ jobs:
             TEMP_FILE="$TEMP_DIR/result-$COUNTER.txt"
             echo "Scanning URL: $url"
             # Use -o to save a clean report for each URL to a temporary file
-            timeout 300 $HOME/go/bin/dalfox url "$url" \
+            (timeout 300 $HOME/go/bin/dalfox url "$url" \
               --custom-payload "$PAYLOAD_FILE" \
               -b "$BLIND_XSS_URL" \
               --skip-headless \
               --fast-scan \
               --skip-mining-all \
               -o "$TEMP_FILE" \
-              "${HEADER_ARGS[@]}"
+              "${HEADER_ARGS[@]}") || true
           done < "$INPUT_FILE"
 
           # Consolidate all temporary results into the final output file, if any
