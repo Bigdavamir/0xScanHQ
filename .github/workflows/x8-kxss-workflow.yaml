@@ -31,7 +31,7 @@ on:
 
 jobs:
   fetch-results:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     outputs:
       urls_exist: ${{ steps.check_files.outputs.urls_exist }}
       params_exist: ${{ steps.check_files.outputs.params_exist }}
@@ -69,7 +69,7 @@ jobs:
           path: combined-results/
 
   generate-matrix:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     needs: fetch-results
     if: "needs.fetch-results.outputs.urls_exist == 'true'"
     outputs:
@@ -123,7 +123,7 @@ jobs:
   x8-scan:
     needs: [fetch-results, generate-matrix]
     if: "github.event.inputs.run_x8 == 'true' && needs.fetch-results.outputs.urls_exist == 'true' && needs.fetch-results.outputs.params_exist == 'true'"
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
@@ -185,7 +185,7 @@ jobs:
   kxss-scan:
     needs: [fetch-results, generate-matrix]
     if: "github.event.inputs.run_kxss == 'true' && needs.fetch-results.outputs.urls_exist == 'true' && needs.fetch-results.outputs.params_exist == 'true'"
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
@@ -243,7 +243,7 @@ jobs:
   push-to-storage:
     needs: [x8-scan, kxss-scan]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Setup SSH and Git
         env:
