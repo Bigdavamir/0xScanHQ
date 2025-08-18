@@ -1,7 +1,7 @@
 name: "XSS Scanner Workflow"
 
 env:
-  LINES_PER_CHUNK: 500
+  LINES_PER_CHUNK: 800
 
 on:
   workflow_dispatch:
