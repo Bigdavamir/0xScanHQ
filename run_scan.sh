@@ -130,7 +130,8 @@ run_x8_scan() {
 
   grep -Ei 'reflects|change reflect' "$output_file" > "$reflected_file" || true
 
-  log_info "[X8] Finished scan on chunk #$chunk_num. Reflected params saved to $reflected_file."
+  log_info "[X8] Finished scan on chunk #$chunk_num."
+  touch "$output_dir/x8_chunk_${chunk_num}.done"
 }
 
 # Function to run kxss scan on a single chunk
@@ -170,7 +171,8 @@ run_kxss_scan() {
     fi
 
     rm "$combined_input_file"
-    log_info "[KXSS] Finished scan on chunk #$chunk_num. Results saved to $output_file."
+    log_info "[KXSS] Finished scan on chunk #$chunk_num."
+    touch "$output_dir/kxss_chunk_${chunk_num}.done"
 }
 
 
@@ -235,6 +237,17 @@ split -l "$LINES_PER_CHUNK" "$URL_FILE" "$TEMP_DIR/chunk_"
 # --- Run Scans in Parallel ---
 pids=()
 chunk_num=0
+TOTAL_JOBS=0
+if $RUN_X8; then
+  TOTAL_JOBS=$((TOTAL_JOBS + CORES))
+fi
+if $RUN_KXSS; then
+  TOTAL_JOBS=$((TOTAL_JOBS + CORES))
+fi
+
+log_info "Starting a total of $TOTAL_JOBS jobs in parallel..."
+START_TIME=$SECONDS
+
 for chunk_file in "$TEMP_DIR"/chunk_*; do
   chunk_num=$((chunk_num + 1))
 
@@ -248,9 +261,25 @@ for chunk_file in "$TEMP_DIR"/chunk_*; do
   fi
 done
 
-log_info "Waiting for all parallel scan jobs to complete... (PIDs: ${pids[*]})"
+# --- Monitor Progress ---
+while true; do
+  COMPLETED_JOBS=$(find "$TEMP_DIR" -name "*.done" | wc -l)
+  ELAPSED_TIME=$(( SECONDS - START_TIME ))
+
+  # \r moves cursor to beginning of line, -n prevents newline
+  echo -ne "${YELLOW}[PROGRESS]${NC} [${COMPLETED_JOBS}/${TOTAL_JOBS}] jobs completed. Elapsed time: ${ELAPSED_TIME}s. \r"
+
+  if [ "$COMPLETED_JOBS" -ge "$TOTAL_JOBS" ]; then
+    echo -ne "\n" # Move to next line after progress is complete
+    log_info "All scan jobs have completed."
+    break
+  fi
+
+  sleep 30 # Check every 30 seconds
+done
+
+# Final wait to reap all background processes
 wait "${pids[@]}"
-log_info "All scan jobs have completed."
 
 # --- Aggregate Results ---
 log_info "Aggregating results..."
