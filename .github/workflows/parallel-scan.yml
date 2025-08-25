@@ -1,0 +1,190 @@
+name: Parallel Subdomain Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'The domain to scan'
+        required: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        worker_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+
+    - name: Install tools
+      run: |
+        go install -v github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest
+        go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+        sudo apt-get update
+        sudo apt-get install -y make gcc libpcap-dev
+        git clone https://github.com/blechschmidt/massdns.git
+        cd massdns
+        make
+        sudo make install
+        cd ..
+
+    - name: Prepare wordlist chunk
+      id: prepare_wordlist
+      run: |
+        # These files must be in the repository root:
+        # assetnote-merged.txt, 4-lower.txt, resolvers.txt
+        if [ ! -f "assetnote-merged.txt" ] || [ ! -f "4-lower.txt" ]; then
+          echo "Wordlist files (assetnote-merged.txt, 4-lower.txt) not found!"
+          exit 1
+        fi
+        cat assetnote-merged.txt 4-lower.txt > full_wordlist.txt
+
+        TOTAL_WORKERS=20
+        WORKER_ID=${{ matrix.worker_id }}
+
+        TOTAL_LINES=$(wc -l < full_wordlist.txt)
+        LINES_PER_WORKER=$(( (TOTAL_LINES + TOTAL_WORKERS - 1) / TOTAL_WORKERS ))
+        START_LINE=$(( (WORKER_ID - 1) * LINES_PER_WORKER + 1 ))
+
+        # The last worker takes all remaining lines
+        if [ "$WORKER_ID" -eq "$TOTAL_WORKERS" ]; then
+          sed -n "${START_LINE},\$p" full_wordlist.txt > chunk_${WORKER_ID}.txt
+        else
+          END_LINE=$(( WORKER_ID * LINES_PER_WORKER ))
+          sed -n "${START_LINE},${END_LINE}p" full_wordlist.txt > chunk_${WORKER_ID}.txt
+        fi
+
+        # Generate subdomains for this chunk
+        DOMAIN=${{ github.event.inputs.domain }}
+        awk -v domain="$DOMAIN" '{print $0"."domain}' "chunk_${WORKER_ID}.txt" > "domain_wordlist_${WORKER_ID}.txt"
+        echo "wordlist_path=domain_wordlist_${WORKER_ID}.txt" >> $GITHUB_OUTPUT
+
+    - name: Run static brute-force on chunk
+      run: |
+        if [ ! -f "resolvers.txt" ]; then
+          echo "resolvers.txt not found! Please add it to the repository root."
+          exit 1
+        fi
+
+        shuffledns -list ${{ steps.prepare_wordlist.outputs.wordlist_path }} -d ${{ github.event.inputs.domain }} -r resolvers.txt -m massdns -mode resolve -silent > "resolved_subdomains_${{ matrix.worker_id }}.txt"
+
+    - name: Upload partial result
+      uses: actions/upload-artifact@v4
+      with:
+        name: partial-results-${{ matrix.worker_id }}
+        path: resolved_subdomains_${{ matrix.worker_id }}.txt
+
+  finalize:
+    runs-on: ubuntu-latest
+    needs: scan
+
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+
+    - name: Set up Go and Python
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Install tools
+      run: |
+        go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+        go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+        go install -v github.com/tomnomnom/anew@latest
+        go install -v github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest
+        pip3 install dnsgen
+        sudo apt-get update
+        sudo apt-get install -y make gcc libpcap-dev
+        git clone https://github.com/blechschmidt/massdns.git
+        cd massdns
+        make
+        sudo make install
+        cd ..
+
+    - name: Download all partial results
+      uses: actions/download-artifact@v4
+      with:
+        path: partial-results
+        pattern: partial-results-*
+        merge-multiple: true
+
+    - name: Combine results and run passive discovery
+      id: combine
+      run: |
+        DOMAIN=${{ github.event.inputs.domain }}
+
+        cat *.txt | sort -u > $DOMAIN.dns_brute
+        echo "[+] Static brute finished: $(wc -l < $DOMAIN.dns_brute) subdomains resolved."
+
+        echo "[*] Running passive subdomain discovery with subfinder..."
+        subfinder -d $DOMAIN -all | dnsx -silent | anew $DOMAIN.dns_brute > /dev/null
+        echo "[+] Subfinder + dnsx finished: $(wc -l < $DOMAIN.dns_brute) total subdomains."
+        echo "results_file=$DOMAIN.dns_brute" >> $GITHUB_OUTPUT
+
+    - name: Generate more subdomains with dnsgen
+      id: dnsgen
+      run: |
+        if [ ! -f "words.txt" ]; then
+          echo "words.txt not found! Please add it to the repository root."
+          exit 1
+        fi
+
+        DOMAIN=${{ github.event.inputs.domain }}
+        RESULTS_FILE=${{ steps.combine.outputs.results_file }}
+
+        echo "[*] Generating more subdomains using dnsgen..."
+        cat $RESULTS_FILE | dnsgen -w words.txt -o $DOMAIN.dns_gen
+        echo "[+] DNSGen generated: $(wc -l < $DOMAIN.dns_gen) entries."
+        echo "dnsgen_file=$DOMAIN.dns_gen" >> $GITHUB_OUTPUT
+        echo "results_file=$RESULTS_FILE" >> $GITHUB_OUTPUT
+
+    - name: Final brute-force on dnsgen output
+      id: final_brute
+      run: |
+        DOMAIN=${{ github.event.inputs.domain }}
+        DNSGEN_FILE=${{ steps.dnsgen.outputs.dnsgen_file }}
+        RESULTS_FILE=${{ steps.dnsgen.outputs.results_file }}
+
+        echo "[*] Final brute-force on dnsgen output..."
+        shuffledns -list $DNSGEN_FILE -d $DOMAIN -r resolvers.txt -m massdns -mode resolve -silent | anew $RESULTS_FILE > /dev/null
+        echo "[+] Final total resolved: $(wc -l < $RESULTS_FILE) subdomains."
+        echo "final_results_file=$RESULTS_FILE" >> $GITHUB_OUTPUT
+
+    - name: Set up SSH for results repository
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.RESULTS_REPO_DEPLOY_KEY }}
+
+    - name: Push results to storage repository
+      run: |
+        DOMAIN=${{ github.event.inputs.domain }}
+        RESULTS_FILE=${{ steps.final_brute.outputs.final_results_file }}
+
+        git config --global user.name 'GitHub Actions'
+        git config --global user.email 'github-actions@github.com'
+
+        git clone --depth 1 git@github.com:Bigdavamir/scan-results-storage.git results_repo
+
+        mkdir -p results_repo/$DOMAIN
+        cp $RESULTS_FILE "results_repo/$DOMAIN/subdomains-$(date +%Y-%m-%d).txt"
+
+        cd results_repo
+        git add .
+        if git diff-index --quiet HEAD; then
+          echo "No changes to commit."
+        else
+          git commit -m "Update results for $DOMAIN on $(date +%Y-%m-%d)"
+          git push
+        fi
