@@ -1,0 +1,121 @@
+name: Parallel HTTPX Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      url_file:
+        description: 'The file containing the list of full URLs to scan'
+        required: true
+        default: 'urls.txt'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Create 20 parallel jobs
+        job_index: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install httpx
+        run: pip install httpx-toolkit
+
+      - name: Split URL file for this job
+        run: |
+          URL_FILE="${{ github.event.inputs.url_file }}"
+          if [ ! -f "$URL_FILE" ]; then
+            echo "Error: URL file '$URL_FILE' not found."
+            exit 1
+          fi
+
+          TOTAL_URLS=$(wc -l < "$URL_FILE")
+          TOTAL_JOBS=${{ strategy.matrix-size }}
+          JOB_INDEX=${{ matrix.job_index }}
+
+          # Ceiling division to calculate urls per job
+          URLS_PER_JOB=$(( (TOTAL_URLS + TOTAL_JOBS - 1) / TOTAL_JOBS ))
+
+          START_LINE=$(( (JOB_INDEX - 1) * URLS_PER_JOB + 1 ))
+
+          # Split the file for the current job
+          tail -n +$START_LINE "$URL_FILE" | head -n $URLS_PER_JOB > my_urls_for_job_${JOB_INDEX}.txt
+
+          echo "This job will process $(wc -l < my_urls_for_job_${JOB_INDEX}.txt) URLs."
+
+      - name: Run httpx scan on chunk
+        run: |
+          httpx -l my_urls_for_job_${{ matrix.job_index }}.txt -mc 200 -silent -o results_job_${{ matrix.job_index }}.txt
+
+      - name: Upload scan results artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: scan-results
+          path: results_job_*.txt
+
+  commit_results:
+    needs: scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all scan results
+        uses: actions/download-artifact@v3
+        with:
+          name: scan-results
+          path: all-results
+
+      - name: Consolidate results
+        run: |
+          # Check if any result files were downloaded
+          if [ -z "$(ls -A all-results)" ]; then
+             echo "No result files found. Exiting."
+             exit 0
+          fi
+          cat all-results/*.txt > final_results.txt
+          echo "Consolidated results:"
+          cat final_results.txt
+
+      - name: Checkout results repository
+        # This step checks out the separate repository for storing results
+        # It requires a Deploy Key to be configured (see instructions)
+        uses: actions/checkout@v4
+        with:
+          repository: Bigdavamir/scan-results-storage
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+          path: scan-results-storage
+
+      - name: Commit and push results
+        run: |
+          # Exit if there are no results to commit
+          if [ ! -s ../final_results.txt ]; then
+            echo "No new results to commit."
+            exit 0
+          fi
+
+          cd scan-results-storage
+
+          # Append new results to the main results file
+          cat ../final_results.txt >> results.txt
+
+          # Sort and remove duplicates to keep the file clean
+          sort -u results.txt -o results.txt
+
+          git config --global user.name 'GitHub Actions Bot'
+          git config --global user.email 'github-actions-bot@users.noreply.github.com'
+
+          # Check if there are any changes to commit
+          if [ -n "$(git status --porcelain)" ]; then
+            git add results.txt
+            git commit -m "Add new scan results from Run ${{ github.run_id }}"
+            git push
+            echo "Results pushed successfully."
+          else
+            echo "No new results to commit."
+          fi
