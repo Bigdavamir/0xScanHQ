@@ -147,7 +147,7 @@ jobs:
 
       - name: Run httpx on chunk
         run: |
-          httpx -l httpx-chunk.txt -silent -threads 50 -timeout 10 -retries 2 -follow-redirects > live-urls-chunk.txt
+          httpx -l httpx-chunk.txt -silent -threads 25 -timeout 10 -retries 2 -follow-redirects > live-urls-chunk.txt
 
       - name: Upload httpx result artifact
         uses: actions/upload-artifact@v4
@@ -232,8 +232,8 @@ jobs:
 
           if [[ "$SCANNERS" == *"dalfox"* ]]; then
             echo "Attempting to trigger Dalfox..."
-            curl -v -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
-              https://api.github.com/repos/mamadzht-max/Dalfox-Scanner/actions/workflows/dalfox-scanner.yml/dispatches \
+            curl -s -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/mamad-max/Dalfox-Scanner/actions/workflows/dalfox-scanner.yml/dispatches \
               -d '{
                 "ref": "main", "inputs": {
                   "target_name": "'"${{ matrix.domain }}"'", "storage_repo": "'"$STORAGE_REPO"'",
