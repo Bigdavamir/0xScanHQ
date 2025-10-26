@@ -260,13 +260,16 @@ jobs:
           fi
 
           if [[ "$SCANNERS" == *"nuclei"* ]]; then
-            echo "Triggering Nuclei..."
-            curl -s -X POST -H "Authorization: token $GH_PAT" -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/amirzhtttt-ctrl/Nuclei-Scanner/actions/workflows/nuclei-workflow-template.yaml/dispatches" \
+            echo "Triggering distributed Nuclei scan on Scanner Account..."
+            curl -s -X POST \
+              -H "Authorization: token ${{ secrets.SCANNER_ACCOUNT_PAT }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/bigidavii/Nuclei-Scanner-Farm/dispatches \
               -d '{
-                "ref": "main", "inputs": {
-                  "target_name": "'"${{ matrix.domain }}"'", "storage_repo": "'"$STORAGE_REPO"'",
-                  "custom_cookie": "'"$COOKIE"'", "custom_header": "'"$HEADER"'"
+                "event_type": "run_nuclei_scan",
+                "client_payload": {
+                  "domain": "'"${{ matrix.domain }}"'",
+                  "storage_repo_ssh_url": "'"$STORAGE_REPO"'"
                 }
               }'
           fi
