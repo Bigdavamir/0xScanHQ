@@ -12,6 +12,9 @@ HTTPX_COMMAND="httpx -l $INPUT_FILE -silent -threads 25 -timeout 10 -retries 2 -
 # Run httpx on the input file. If it fails, split the file and retry.
 if ! eval $HTTPX_COMMAND; then
   echo "httpx failed on $INPUT_FILE. Splitting the file and retrying."
+  # Clear the output file to prevent duplicates
+  > $OUTPUT_FILE
+
   # Split the input file into 5 smaller files
   split -n l/5 $INPUT_FILE chunk-
 

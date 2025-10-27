@@ -124,6 +124,9 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.generate-httpx-matrix.outputs.matrix) }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Install httpx
         run: |
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
@@ -133,12 +136,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: discovery-artifacts-${{ matrix.domain }}
-          path: .
+          path: domain_artifacts
 
       - name: Get URL chunk
         run: |
           CHUNK_NUMBER=${{ matrix.chunk }}
-          INPUT_FILE="non-static-urls.txt"
+          INPUT_FILE="domain_artifacts/non-static-urls.txt"
           CHUNK_FILE="httpx-chunk.txt"
           LINES_PER_CHUNK=4000
           START_LINE=$(( (CHUNK_NUMBER - 1) * LINES_PER_CHUNK + 1 ))
