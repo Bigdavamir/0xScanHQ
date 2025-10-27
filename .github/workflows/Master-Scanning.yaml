@@ -160,7 +160,7 @@ jobs:
 
       - name: Clean up disk space
         if: always()
-        run: rm non-static-urls.txt
+        run: rm -rf domain_artifacts
 
   # Job 5: For each domain, consolidate httpx results and trigger downstream scanners
   finish-scan:
